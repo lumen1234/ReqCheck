@@ -1,15 +1,82 @@
-# 忽略虚拟环境
-venv/
-.venv/
-env/
-
-# 忽略 Python 缓存
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
 
-# 忽略 IDE 配置
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+tmp/
+temp/
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# 忽略环境变量敏感文件
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Flask
+instance/
+*.db
+
+# Uploads
+uploads/
+
+# Logs
+logs/
+*.log
+
+# Environment variables
 .env
+.env.local
+.env.*.local
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# Test files
+.test
+.coverage
+coverage.xml
+
+# Dependency files
+Pipfile.lock
+poetry.lock
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
