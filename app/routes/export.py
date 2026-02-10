@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from app import app
+from app.models import RequirementTree
 import os
 import json
 
@@ -21,51 +22,36 @@ def export_requirements():
     if not filepath:
         return jsonify({'error': 'Document not found'}), 404
     
-    # 模拟需求数据（实际项目中应该从解析结果中获取）
-    requirements = [
-        {
-            'id': 'req1',
-            'title': '总体需求',
-            'description': '项目的总体目标和要求',
-            'parent_id': 'root'
-        },
-        {
-            'id': 'req2',
-            'title': '范围',
-            'description': '项目的边界和包含内容',
-            'parent_id': 'root'
-        },
-        {
-            'id': 'req3',
-            'title': '引用文档',
-            'description': '相关的标准和规范',
-            'parent_id': 'root'
-        },
-        {
-            'id': 'req4',
-            'title': '要求的状态和方式',
-            'description': '需求的状态和验证方式',
-            'parent_id': 'req5'
-        },
-        {
-            'id': 'req5',
-            'title': '需求',
-            'description': '详细的功能和非功能需求',
-            'parent_id': 'root'
-        },
-        {
-            'id': 'req6',
-            'title': '能力需求',
-            'description': '系统需要具备的功能',
-            'parent_id': 'req5'
-        },
-        {
-            'id': 'req7',
-            'title': '工作流程',
-            'description': '系统的操作流程',
-            'parent_id': 'req6'
+    # 从数据库中获取实际的需求树数据
+    requirement_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
+    if not requirement_tree:
+        return jsonify({'error': 'Requirement tree not found'}), 404
+    
+    # 将树形结构转换为导出格式
+    req_tree = requirement_tree.tree_json
+    requirements = []
+    req_id_counter = 1
+    
+    def traverse_tree(node, parent_id):
+        nonlocal req_id_counter
+        req_id = f"req{req_id_counter}"
+        req_id_counter += 1
+        
+        # 创建需求对象
+        requirement = {
+            'id': req_id,
+            'title': node['name'],
+            'description': node.get('original_text', node['name']),
+            'parent_id': parent_id
         }
-    ]
+        requirements.append(requirement)
+        
+        # 递归处理子节点
+        for child in node.get('children', []):
+            traverse_tree(child, req_id)
+    
+    # 开始遍历需求树
+    traverse_tree(req_tree, 'root')
     
     # 导出为JSON
     export_file = f"{doc_id}_requirements.json"

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "req1",
+    "title": "总体需求",
+    "description": "项目的总体目标和要求",
+    "parent_id": "root"
+  },
+  {
+    "id": "req2",
+    "title": "范围",
+    "description": "项目的边界和包含内容",
+    "parent_id": "root"
+  },
+  {
+    "id": "req3",
+    "title": "引用文档",
+    "description": "相关的标准和规范",
+    "parent_id": "root"
+  },
+  {
+    "id": "req4",
+    "title": "要求的状态和方式",
+    "description": "需求的状态和验证方式",
+    "parent_id": "req5"
+  },
+  {
+    "id": "req5",
+    "title": "需求",
+    "description": "详细的功能和非功能需求",
+    "parent_id": "root"
+  },
+  {
+    "id": "req6",
+    "title": "能力需求",
+    "description": "系统需要具备的功能",
+    "parent_id": "req5"
+  },
+  {
+    "id": "req7",
+    "title": "工作流程",
+    "description": "系统的操作流程",
+    "parent_id": "req6"
+  }
+]
