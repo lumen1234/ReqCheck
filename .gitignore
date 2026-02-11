@@ -80,3 +80,6 @@ poetry.lock
 
 # Yarn Integrity file
 .yarn-integrity
+
+# Frontend node modules
+frontend/node_modules/
