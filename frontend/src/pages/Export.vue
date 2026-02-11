@@ -33,13 +33,21 @@
             :closable="false"
           ></el-alert>
           
-          <h3 style="margin-top: 20px;">需求列表</h3>
-          <el-table :data="requirements" style="width: 100%; margin-top: 10px;">
-            <el-table-column prop="id" label="需求ID" width="120"></el-table-column>
-            <el-table-column prop="title" label="需求标题"></el-table-column>
-            <el-table-column prop="description" label="需求描述"></el-table-column>
-            <el-table-column prop="parent_id" label="父需求ID" width="120"></el-table-column>
-          </el-table>
+          <h3 style="margin-top: 20px;">需求树结构</h3>
+          <el-tree
+            :data="requirements.children"
+            :props="treeProps"
+            node-key="id"
+            default-expand-all
+            style="margin-top: 10px;"
+          >
+            <template #default="{ node, data }">
+              <span class="custom-tree-node">
+                <span>{{ data.label }}</span>
+                <span v-if="data.content" class="original-text">{{ data.content }}</span>
+              </span>
+            </template>
+          </el-tree>
           
           <div style="margin-top: 20px;">
             <el-button type="primary" @click="downloadJson">下载JSON文件</el-button>
@@ -64,7 +72,11 @@ export default {
       exportError: '',
       exportSuccess: false,
       exportFile: '',
-      requirements: []
+      requirements: {},
+      treeProps: {
+        children: 'children',
+        label: 'label'
+      }
     }
   },
   mounted() {

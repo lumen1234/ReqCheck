@@ -172,7 +172,13 @@ def construct_requirement_tree(content, doc_name):
     # 根据附录J的结构构造需求树
     tree = {
         'id': 'root',
+        'label': doc_name,
         'name': doc_name,
+        'original_text': doc_name,
+        'content': None,
+        'level': 0,
+        'v_status': True,
+        'e_status': 'pending',
         'children': []
     }
     
@@ -237,8 +243,13 @@ def construct_requirement_tree(content, doc_name):
         # 添加默认的需求节点
         default_node = {
             'id': 'default_0',
+            'label': '需求',
             'name': '需求',
             'original_text': '需求',
+            'content': None,
+            'level': 1,
+            'v_status': True,
+            'e_status': 'pending',
             'children': []
         }
         tree['children'].append(default_node)
@@ -260,9 +271,14 @@ def construct_requirement_tree(content, doc_name):
             original_text = title_text
         
         node = {
-            'id': f'level{level}_{i}',
+            'id': f'node_{i}',
+            'label': node_name,
             'name': node_name,
             'original_text': original_text,
+            'content': None,
+            'level': level,
+            'v_status': True,
+            'e_status': 'pending',
             'children': []
         }
         
