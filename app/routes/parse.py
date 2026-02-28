@@ -172,13 +172,7 @@ def construct_requirement_tree(content, doc_name):
     # 根据附录J的结构构造需求树
     tree = {
         'id': 'root',
-        'label': doc_name,
         'name': doc_name,
-        'original_text': doc_name,
-        'content': None,
-        'level': 0,
-        'v_status': True,
-        'e_status': 'pending',
         'children': []
     }
     
@@ -210,46 +204,61 @@ def construct_requirement_tree(content, doc_name):
         '6': '注释'
     }
     
-    # 构建一个简单的树状结构，只包含真正的标题
-    # 首先，过滤出真正的标题
-    headings = []
+    # 首先，处理内容，将标题和对应的内容关联起来
+    heading_contents = []
+    current_heading = None
+    current_content = []
+    
     for item in content:
         if item['type'] == 'heading':
+            # 如果当前有未处理的标题，保存它的内容
+            if current_heading:
+                heading_contents.append({
+                    'heading': current_heading,
+                    'content': ' '.join(current_content)
+                })
+                current_content = []
+            # 开始处理新的标题
             title_number = item.get('title_number')
             if title_number:
-                # 提取标题文本
                 import re
                 match = re.match(r'^\d+(\.\d+)*[\s\t]+', item['text'])
                 if match:
                     title_text = item['text'][len(match.group(0)):].strip()
                     level = len(title_number.split('.'))
-                    headings.append({
+                    current_heading = {
                         'level': level,
                         'number': title_number,
                         'text': title_text
-                    })
+                    }
             else:
                 # 处理没有编号的标题（通过关键术语识别的）
                 title_text = item['text']
                 level = item['level']
-                headings.append({
+                current_heading = {
                     'level': level,
                     'number': None,
                     'text': title_text
-                })
+                }
+        else:
+            # 普通内容，添加到当前标题的内容中
+            current_content.append(item['text'])
+    
+    # 处理最后一个标题的内容
+    if current_heading:
+        heading_contents.append({
+            'heading': current_heading,
+            'content': ' '.join(current_content)
+        })
     
     # 如果没有找到标题，使用默认结构
-    if not headings:
+    if not heading_contents:
         # 添加默认的需求节点
         default_node = {
             'id': 'default_0',
-            'label': '需求',
             'name': '需求',
             'original_text': '需求',
-            'content': None,
-            'level': 1,
-            'v_status': True,
-            'e_status': 'pending',
+            'content': '',
             'children': []
         }
         tree['children'].append(default_node)
@@ -257,7 +266,10 @@ def construct_requirement_tree(content, doc_name):
     
     # 构建树状结构
     current_levels = {}
-    for i, heading in enumerate(headings):
+    for i, item in enumerate(heading_contents):
+        heading = item['heading']
+        content_text = item['content']
+        
         level = heading['level']
         title_number = heading['number']
         title_text = heading['text']
@@ -271,14 +283,10 @@ def construct_requirement_tree(content, doc_name):
             original_text = title_text
         
         node = {
-            'id': f'node_{i}',
-            'label': node_name,
+            'id': f'level{level}_{i}',
             'name': node_name,
             'original_text': original_text,
-            'content': None,
-            'level': level,
-            'v_status': True,
-            'e_status': 'pending',
+            'content': content_text,
             'children': []
         }
         
@@ -300,7 +308,5 @@ def construct_requirement_tree(content, doc_name):
                 # 如果没有找到父级节点，添加到根节点
                 tree['children'].append(node)
                 current_levels[level] = tree['children']
-    
-
     
     return tree

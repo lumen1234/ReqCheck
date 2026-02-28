@@ -29,33 +29,30 @@ def export_requirements():
     
     # 将树形结构转换为导出格式
     req_tree = requirement_tree.tree_json
+    requirements = []
     req_id_counter = 1
     
-    def traverse_tree(node):
+    def traverse_tree(node, parent_id):
         nonlocal req_id_counter
-        req_id = f"node_{req_id_counter}"
+        req_id = f"req{req_id_counter}"
         req_id_counter += 1
         
         # 创建需求对象
         requirement = {
             'id': req_id,
-            'label': node['label'],
-            'content': node.get('content', None),
-            'level': node.get('level', 0),
-            'v_status': node.get('v_status', True),
-            'e_status': node.get('e_status', 'pending'),
-            'children': []
+            'title': node['name'],
+            'description': node.get('original_text', node['name']),
+            'content': node.get('content', ''),
+            'parent_id': parent_id
         }
+        requirements.append(requirement)
         
         # 递归处理子节点
         for child in node.get('children', []):
-            child_req = traverse_tree(child)
-            requirement['children'].append(child_req)
-        
-        return requirement
+            traverse_tree(child, req_id)
     
     # 开始遍历需求树
-    requirements = traverse_tree(req_tree)
+    traverse_tree(req_tree, 'root')
     
     # 导出为JSON
     export_file = f"{doc_id}_requirements.json"
@@ -66,6 +63,5 @@ def export_requirements():
     
     return jsonify({
         'export_file': export_file,
-        'export_path': export_path,
         'requirements': requirements
     })
