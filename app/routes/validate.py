@@ -7,9 +7,8 @@ import json
 
 validate_bp = Blueprint('validate', __name__)
 
-@validate_bp.route('/api/validate', methods=['POST'])
-def validate_requirements():
-    doc_id = request.json.get('doc_id')
+@validate_bp.route('/api/validate/<doc_id>', methods=['GET'])
+def validate_requirements(doc_id):
     if not doc_id:
         return jsonify({'error': 'doc_id is required'}), 400
     
@@ -35,10 +34,17 @@ def validate_requirements():
     # 从数据库中获取实际的需求树
     from app.models import RequirementTree
     requirement_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
-    if not requirement_tree:
-        return jsonify({'error': 'Requirement tree not found'}), 404
     
-    req_tree = requirement_tree.tree_json
+    if not requirement_tree:
+        # 如果数据库中没有，从JSON文件中读取
+        json_file = os.path.join(app.config.get('PARSE_OUTPUT_FOLDER', os.path.join(os.path.dirname(os.path.dirname(__file__)), 'parse_results')), f"{doc_id}.json")
+        if os.path.exists(json_file):
+            with open(json_file, 'r', encoding='utf-8') as f:
+                req_tree = json.load(f)
+        else:
+            return jsonify({'error': 'Requirement tree not found in database or file'}), 404
+    else:
+        req_tree = requirement_tree.tree_json
     
     # 执行批处理验证
     validation_results = validate_batch(req_tree, rules)
@@ -184,104 +190,104 @@ def call_deepseek_api(prompt, model, api_key, api_url):
         return '{"result": true, "reason": "由于网络原因，大模型验证暂时不可用，默认标记为合规。"}'
 
 
+BATCH_SIZE = 10  # 每批验证的节点数量
+
 def validate_batch(req_tree, rules):
     """批处理验证需求树"""
     # 收集所有需要验证的节点
     nodes = []
     collect_nodes(req_tree, nodes)
     
+    print(f"收集到 {len(nodes)} 个节点进行验证")
+    
     # 如果没有节点，返回空结果
     if not nodes:
         return []
     
-    # 构造逐条验证的提示词
-    prompt = construct_validation_prompt(nodes, rules)
+    # 跳过根节点
+    if nodes and nodes[0].get('id') == 'root':
+        nodes = nodes[1:]
     
-    # 调用大模型API
-    model_response = call_deepseek_api(
-        prompt,
-        app.config['API_MODEL_DEFAULT'],
-        app.config['API_KEY_DEFAULT'],
-        app.config['API_URL_DEFAULT']
-    )
+    # 分批验证
+    all_results = []
+    total_batches = (len(nodes) + BATCH_SIZE - 1) // BATCH_SIZE
     
-    # 解析大模型响应
-    try:
-        # 首先尝试直接解析整个响应
-        print(f"API响应: {model_response[:500]}...")  # 打印响应前500字符用于调试
+    for batch_idx in range(total_batches):
+        start_idx = batch_idx * BATCH_SIZE
+        end_idx = min(start_idx + BATCH_SIZE, len(nodes))
+        batch_nodes = nodes[start_idx:end_idx]
         
-        # 清理响应内容，移除可能的额外字符
-        cleaned_response = model_response.strip()
+        print(f"验证第 {batch_idx + 1}/{total_batches} 批 ({start_idx + 1}-{end_idx} 个节点)...")
         
-        # 修复可能的JSON格式问题
-        # 1. 移除响应末尾可能的不完整部分
-        if cleaned_response.endswith('...'):
-            cleaned_response = cleaned_response[:-3]
+        # 构造当前批次的提示词
+        prompt = construct_validation_prompt(batch_nodes, rules)
         
-        # 2. 确保响应以正确的JSON格式结束
-        if cleaned_response.startswith('[') and not cleaned_response.endswith(']'):
-            # 尝试找到最后一个有效的JSON对象结束位置
-            import re
-            last_brace = cleaned_response.rfind('}')
-            if last_brace != -1:
-                cleaned_response = cleaned_response[:last_brace+1] + ']'
+        # 调用大模型API
+        model_response = call_deepseek_api(
+            prompt,
+            app.config['API_MODEL_DEFAULT'],
+            app.config['API_KEY_DEFAULT'],
+            app.config['API_URL_DEFAULT']
+        )
         
-        # 尝试直接解析为JSON
+        # 解析大模型响应
         try:
-            validation_results = json.loads(cleaned_response)
-            # 确保结果是数组
-            if not isinstance(validation_results, list):
-                validation_results = [validation_results]
-        except json.JSONDecodeError as e:
-            print(f"直接解析失败: {str(e)}")
-            # 如果直接解析失败，尝试提取JSON部分
-            import re
-            # 尝试匹配完整的JSON数组
-            json_match = re.search(r'\[\s*\{[\s\S]*?\}\s*\]', cleaned_response)
-            if json_match:
-                try:
-                    # 再次清理提取的JSON
-                    extracted_json = json_match.group(0)
-                    # 确保JSON格式正确
-                    if extracted_json.startswith('[') and not extracted_json.endswith(']'):
-                        extracted_json += ']'
-                    validation_results = json.loads(extracted_json)
-                except json.JSONDecodeError:
-                    # 如果提取的JSON仍然解析失败，生成默认结果
-                    validation_results = generate_default_results(nodes)
-            else:
-                # 如果没有找到JSON数组，尝试解析单个JSON对象
-                json_match = re.search(r'\{[\s\S]*?\}', cleaned_response)
+            print(f"API响应: {model_response[:200]}...")
+            
+            # 清理响应内容
+            cleaned_response = model_response.strip()
+            
+            if cleaned_response.startswith('[') and not cleaned_response.endswith(']'):
+                import re
+                last_brace = cleaned_response.rfind('}')
+                if last_brace != -1:
+                    cleaned_response = cleaned_response[:last_brace+1] + ']'
+            
+            try:
+                batch_results = json.loads(cleaned_response)
+                if not isinstance(batch_results, list):
+                    batch_results = [batch_results]
+            except json.JSONDecodeError:
+                import re
+                json_match = re.search(r'\[\s*\{[\s\S]*?\}\s*\]', cleaned_response)
                 if json_match:
-                    try:
-                        single_result = json.loads(json_match.group(0))
-                        # 将单个结果转换为数组
-                        validation_results = [single_result]
-                    except json.JSONDecodeError:
-                        # 如果提取的JSON仍然解析失败，生成默认结果
-                        validation_results = generate_default_results(nodes)
+                    batch_results = json.loads(json_match.group(0))
                 else:
-                    # 如果仍然没有找到JSON，生成默认结果
-                    validation_results = generate_default_results(nodes)
-    except Exception as e:
-        print(f"解析响应失败: {str(e)}")
-        print(f"响应内容: {model_response[:500]}...")  # 打印响应内容用于调试
-        # 生成默认结果
-        validation_results = generate_default_results(nodes)
+                    batch_results = generate_default_results(batch_nodes)
+            
+            all_results.extend(batch_results)
+            print(f"  本批验证完成，获得 {len(batch_results)} 个结果")
+            
+        except Exception as e:
+            print(f"解析响应失败: {str(e)}")
+            all_results.extend(generate_default_results(batch_nodes))
     
-    return validation_results
+    # 添加根节点验证结果
+    root_result = {
+        'id': 'root',
+        'name': req_tree.get('label', 'root'),
+        'result': True,
+        'reason': '根节点，无对应规范要求。',
+        'parent_id': None
+    }
+    
+    return [root_result] + all_results
 
 def collect_nodes(node, nodes, parent_id=None):
     """收集需求树中的所有节点"""
     nodes.append({
         'id': node['id'],
-        'name': node['name'],
-        'original_text': node.get('original_text', node['name']),
+        'name': node.get('label', node.get('name', '')),
+        'original_text': node.get('content', node.get('original_text', node.get('label', ''))),
         'parent_id': parent_id
     })
     
-    # 递归收集子节点
-    for child in node.get('children', []):
+    # 递归收集子节点，处理 children 为 None 的情况
+    children = node.get('children')
+    if children is None:
+        children = []
+    
+    for child in children:
         collect_nodes(child, nodes, node['id'])
 
 def construct_validation_prompt(nodes, rules):
@@ -312,7 +318,8 @@ def construct_validation_prompt(nodes, rules):
         # 尝试从节点名称中提取标题号
         title_number = None
         import re
-        match = re.match(r'^(\d+(\.\d+)*)', node['original_text'])
+        original_text = node.get('original_text') or ''
+        match = re.match(r'^(\d+(\.\d+)*)', original_text)
         if match:
             title_number = match.group(1)
         
@@ -339,7 +346,7 @@ def construct_validation_prompt(nodes, rules):
         prompt += f"名称: {node['name']}\n"
         prompt += f"标题号: {title_number or '无'}\n"
         prompt += f"# 文档规范\n{rule}\n"
-        prompt += f"# 文档内容\n{node['original_text']}\n"
+        prompt += f"# 文档内容\n{original_text}\n"
     
     prompt += "\n请严格按照以下格式返回验证结果，不要包含其他无关内容：\n"
     prompt += "[\n"

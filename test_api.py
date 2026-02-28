@@ -25,7 +25,7 @@ def test_connectivity():
     # 测试2: 检查上传接口
     print("\n[测试2] /upload 接口...")
     try:
-        response = requests.post(f"{BASE_URL}/api/pload", json={}, timeout=5)
+        response = requests.post(f"{BASE_URL}/api/upload", json={}, timeout=5)
         print(f"  状态码: {response.status_code}")
         if response.status_code in [200, 400]:
             data = response.json()

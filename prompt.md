@@ -1,0 +1,8 @@
+后端数据库中应该以列表形式存储对应文档需求树的所有结点
+属性为：id label content reason level v_status e_status parent_id doc_id
+
+需求按照MEMS需求规格说明，基于一级标题、二级标题，构造需求树。根节点label应当是文档名，content为null（因为根节点一定不是叶子结点），level为0。一级节点的label应当是来自于各个一级标题，如果一级标题下没有所属的二级标题，这content就是这个一级标题下的内容，该一级节点本身即为叶子结点；若一级标题下有二级标题，则content为null，该一级节点也有所属的二级结点，一级节点的level为1。二级节点的label应当是来自于二级标题，该树的最大深度为2，因此二级结点的content为二级标题的所有内容，二级结点的level为2。
+
+在parse.py中，后端应解析上传的文档，并生成对应的需求树结点，注意他仅起到解析作用，并不能为reason,v_status,e_status赋值
+
+在validate.py中，后端应根据解析出的需求树结点，找到所有的叶子结点（可能是一级结点，也可能是二级结点），并为这些叶子结点的v_status赋值为True。

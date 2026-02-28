@@ -1,18 +1,13 @@
-from flask import Blueprint, request, jsonify, send_file
-from app import app
-from app.models import db, Document as DocModel, RequirementTree
 import os
 import re
 import json
-import requests
+import sys
 from docx import Document
+import requests
 
-parse_bp = Blueprint('parse', __name__)
-
-PARSE_OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'parse_results')
-
-if not os.path.exists(PARSE_OUTPUT_FOLDER):
-    os.makedirs(PARSE_OUTPUT_FOLDER)
+API_KEY = "sk-ba7862f60e3e460e88e17dad82e34982"
+API_URL = "https://api.deepseek.com"
+API_MODEL = "deepseek-chat"
 
 def extract_text_from_docx(filepath):
     doc = Document(filepath)
@@ -23,14 +18,14 @@ def extract_text_from_docx(filepath):
             text_lines.append(text)
     return '\n'.join(text_lines)
 
-def call_llm_api(prompt, model, api_key, api_url, retries=3):
+def call_llm_api(prompt, retries=3):
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': f'Bearer {api_key}'
+        'Authorization': f'Bearer {API_KEY}'
     }
     
     data = {
-        'model': model,
+        'model': API_MODEL,
         'messages': [
             {
                 'role': 'system',
@@ -49,7 +44,7 @@ def call_llm_api(prompt, model, api_key, api_url, retries=3):
         try:
             session = requests.Session()
             response = session.post(
-                api_url + '/chat/completions',
+                API_URL + '/chat/completions',
                 headers=headers,
                 json=data,
                 timeout=120
@@ -111,11 +106,7 @@ def parse_document_with_llm(text):
 
 请返回JSON："""
 
-    model = app.config.get('API_MODEL_DEFAULT', 'deepseek-chat')
-    api_key = app.config.get('API_KEY_DEFAULT')
-    api_url = app.config.get('API_URL_DEFAULT', 'https://api.deepseek.com')
-    
-    response = call_llm_api(prompt, model, api_key, api_url)
+    response = call_llm_api(prompt)
     
     if response:
         response = response.strip()
@@ -134,6 +125,7 @@ def parse_document_with_llm(text):
             print(f"JSON解析失败: {str(e)}")
             print(f"尝试修复截断的JSON...")
             
+            import re
             match = re.search(r'\{[\s\S]*\}', response)
             if match:
                 try:
@@ -147,82 +139,49 @@ def parse_document_with_llm(text):
     
     return None
 
-def save_json_to_file(doc_id, tree):
-    output_filename = f"{doc_id}.json"
-    output_path = os.path.join(PARSE_OUTPUT_FOLDER, output_filename)
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(tree, f, ensure_ascii=False, indent=2)
-    
-    return output_path
+def main():
+    if len(sys.argv) < 2:
+        input_file = r"e:\req_com1\MEMS陀螺软件需求规格说明.docx"
+    else:
+        input_file = sys.argv[1]
 
-@parse_bp.route('/api/parse/<doc_id>', methods=['GET'])
-def parse_document(doc_id):
-    if not doc_id:
-        return jsonify({'error': 'doc_id is required'}), 400
-    
-    document = DocModel.query.filter_by(id=doc_id).first()
-    if not document:
-        return jsonify({'error': 'Document not found'}), 404
-    
-    filepath = document.file_path
-    if not os.path.exists(filepath):
-        return jsonify({'error': 'File not found on disk'}), 404
-    
-    print("正在使用大模型API解析文档...")
-    text = extract_text_from_docx(filepath)
+    output_file = input_file.replace('.docx', '.json')
+
+    print(f"正在解析文档: {input_file}")
+    print("正在使用大模型API智能解析...")
+
+    text = extract_text_from_docx(input_file)
     result = parse_document_with_llm(text)
     
     if result and 'tree' in result:
-        req_tree = result['tree']
-        print("大模型解析成功")
+        tree = result['tree']
+        print("大模型解析成功!")
     else:
-        return jsonify({'error': '大模型解析失败，请检查API配置或网络连接'}), 500
-    
-    output_path = save_json_to_file(doc_id, req_tree)
-    print(f"JSON已保存到: {output_path}")
-    
-    tree = RequirementTree(
-        doc_id=doc_id,
-        tree_json=req_tree
-    )
-    db.session.add(tree)
-    
-    if document:
-        document.status = '已解析'
-    
-    db.session.commit()
-    
-    return jsonify({
-        'requirement_tree': req_tree,
-        'output_file': output_path
-    })
+        print("大模型解析失败，请检查API配置或网络连接")
+        return
 
-@parse_bp.route('/api/parse/<doc_id>/download', methods=['GET'])
-def download_parse_result(doc_id):
-    output_filename = f"{doc_id}.json"
-    output_path = os.path.join(PARSE_OUTPUT_FOLDER, output_filename)
-    
-    if not os.path.exists(output_path):
-        return jsonify({'error': 'File not found'}), 404
-    
-    return send_file(
-        output_path,
-        mimetype='application/json',
-        as_attachment=True,
-        download_name=f"parse_result_{doc_id}.json"
-    )
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(tree, f, ensure_ascii=False, indent=2)
 
-@parse_bp.route('/api/parse/results', methods=['GET'])
-def list_parse_results():
-    files = []
-    for filename in os.listdir(PARSE_OUTPUT_FOLDER):
-        if filename.endswith('.json'):
-            filepath = os.path.join(PARSE_OUTPUT_FOLDER, filename)
-            files.append({
-                'filename': filename,
-                'doc_id': filename.replace('.json', ''),
-                'size': os.path.getsize(filepath),
-                'created_time': os.path.getctime(filepath)
-            })
-    return jsonify({'results': files})
+    print(f"解析完成，已保存到: {output_file}")
+
+    def count_nodes(node):
+        count = 1
+        if node.get('children'):
+            for child in node['children']:
+                count += count_nodes(child)
+        return count
+
+    def count_with_content(node):
+        count = 1 if node.get('content') else 0
+        if node.get('children'):
+            for child in node['children']:
+                count += count_with_content(child)
+        return count
+
+    total = count_nodes(tree)
+    with_content = count_with_content(tree)
+    print(f"共解析出 {total} 个节点，其中 {with_content} 个节点包含内容")
+
+if __name__ == '__main__':
+    main()

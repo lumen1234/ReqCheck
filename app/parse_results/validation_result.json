@@ -1,0 +1,121 @@
+[
+  {
+    "id": "root",
+    "name": "MEMS陀螺软件需求规格说明",
+    "parent_id": "",
+    "reason": "根节点，无对应规范，默认合规。",
+    "result": true
+  },
+  {
+    "id": "node_1",
+    "name": "1. 范围",
+    "parent_id": "root",
+    "reason": "章节节点，无对应规范，默认合规。",
+    "result": true
+  },
+  {
+    "id": "node_1_1",
+    "name": "1.1. 标识",
+    "parent_id": "node_1",
+    "reason": "内容完整，提供了文档标识、名称、版本号等信息。",
+    "result": true
+  },
+  {
+    "id": "node_1_2",
+    "name": "1.2. 系统概述",
+    "parent_id": "node_1",
+    "reason": "内容不完整，需求方和开发方信息缺失。",
+    "result": false
+  },
+  {
+    "id": "node_1_3",
+    "name": "1.3. 文档概述",
+    "parent_id": "node_1",
+    "reason": "内容完整，说明了文档目的和依据标准。",
+    "result": true
+  },
+  {
+    "id": "node_2",
+    "name": "2. 引用文档",
+    "parent_id": "root",
+    "reason": "内容不完整，仅提及存在引用表，但未列出具体引用文档。",
+    "result": false
+  },
+  {
+    "id": "node_3",
+    "name": "3. 需求",
+    "parent_id": "root",
+    "reason": "章节节点，无对应规范，默认合规。",
+    "result": true
+  },
+  {
+    "id": "node_3_1",
+    "name": "3.1. 要求的状态和方式",
+    "parent_id": "node_3",
+    "reason": "内容完整，描述了系统工作方式、性能指标（时延、波特率、数据格式）。",
+    "result": true
+  },
+  {
+    "id": "node_3_2",
+    "name": "3.2. 能力需求",
+    "parent_id": "node_3",
+    "reason": "章节节点，无对应规范，默认合规。",
+    "result": true
+  },
+  {
+    "id": "node_3_2_1",
+    "name": "3.2.1. 工作流程",
+    "parent_id": "node_3_2",
+    "reason": "内容完整，以文字描述了软件工作主流程。",
+    "result": true
+  },
+  {
+    "id": "node_3_2_2",
+    "name": "3.2.2. 配置项初始化功能需求",
+    "parent_id": "node_3_2",
+    "reason": "内容不完整，仅提及存在需求表，但未描述具体需求内容。",
+    "result": false
+  },
+  {
+    "id": "node_3_2_3",
+    "name": "3.2.3. 陀螺数据接收功能需求",
+    "parent_id": "node_3_2",
+    "reason": "内容不完整，仅提及存在需求表，但未描述具体需求内容。",
+    "result": false
+  },
+  {
+    "id": "node_3_2_4",
+    "name": "3.2.4. 数据处理功能需求",
+    "parent_id": "node_3_2",
+    "reason": "内容不完整，仅提及存在需求表，但未描述具体需求内容。",
+    "result": false
+  },
+  {
+    "id": "node_3_2_5",
+    "name": "3.2.5. 外部触发需求",
+    "parent_id": "node_3_2",
+    "reason": "内容不完整，仅提及存在需求表，但未描述具体需求内容。",
+    "result": false
+  },
+  {
+    "id": "node_3_2_6",
+    "name": "3.2.6. 自检需求",
+    "parent_id": "node_3_2",
+    "reason": "内容不完整，仅提及存在需求表，但未描述具体需求内容。",
+    "result": false
+  },
+  {
+    "id": "node_3_2_7",
+    "name": "3.2.7. 数据打包功能需求",
+    "parent_id": "node_3_2",
+    "reason": "内容不完整，仅提及存在需求表，但未描述具体需求内容。",
+    "result": false
+  },
+  {
+    "id": "node_3_2_8",
+    "name": "3.2.8. 数据发送功能需求",
+    "parent_id": "node_3_2",
+    "reason": "内容不完整，仅提及存在需求表，但未描述具体需求内容。",
+    "result": false
+  }
+]

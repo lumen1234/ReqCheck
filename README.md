@@ -92,8 +92,8 @@ curl http://127.0.0.1:5000/documents
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
-| `/upload` | POST | 上传文档 |
-| `/parse` | POST | 解析文档 |
+| `/upload` | POST | 上传文档 |  
+| `/parse` | POST | 解析文档 | // 解析文档后，返回需求树
 | `/validate` | POST | 验证需求 |
 | `/export` | POST | 导出JSON |
 | `/documents` | GET | 获取文档列表 |
