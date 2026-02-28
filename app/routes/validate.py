@@ -7,7 +7,7 @@ import json
 
 validate_bp = Blueprint('validate', __name__)
 
-@validate_bp.route('/validate', methods=['POST'])
+@validate_bp.route('/api/validate', methods=['POST'])
 def validate_requirements():
     doc_id = request.json.get('doc_id')
     if not doc_id:

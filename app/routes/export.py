@@ -6,7 +6,7 @@ import json
 
 export_bp = Blueprint('export', __name__)
 
-@export_bp.route('/export', methods=['POST'])
+@export_bp.route('/api/export', methods=['POST'])
 def export_requirements():
     doc_id = request.json.get('doc_id')
     if not doc_id:

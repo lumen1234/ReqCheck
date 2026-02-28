@@ -7,7 +7,7 @@ from docx import Document
 
 parse_bp = Blueprint('parse', __name__)
 
-@parse_bp.route('/parse', methods=['POST'])
+@parse_bp.route('/api/parse', methods=['POST'])
 def parse_document():
     doc_id = request.json.get('doc_id')
     if not doc_id:

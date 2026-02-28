@@ -3,7 +3,7 @@ from app.models import Document, RequirementTree, ValidationResult
 
 history_bp = Blueprint('history', __name__)
 
-@history_bp.route('/documents', methods=['GET'])
+@history_bp.route('/api/documents', methods=['GET'])
 def get_documents():
     """获取所有文档列表"""
     documents = Document.query.all()

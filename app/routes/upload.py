@@ -6,7 +6,7 @@ import uuid
 
 upload_bp = Blueprint('upload', __name__)
 
-@upload_bp.route('/upload', methods=['POST'])
+@upload_bp.route('/api/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
