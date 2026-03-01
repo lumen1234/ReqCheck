@@ -11,15 +11,13 @@ EXPORT_OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
 if not os.path.exists(EXPORT_OUTPUT_FOLDER):
     os.makedirs(EXPORT_OUTPUT_FOLDER)
 
-@export_bp.route('/api/export', methods=['POST'])
-def export_requirements():
-    doc_id = request.json.get('doc_id')
+@export_bp.route('/api/export/<doc_id>', methods=['GET'])
+def export_requirements(doc_id):
     if not doc_id:
         return jsonify({'error': 'doc_id is required'}), 400
     
     req_tree = None
     
-    # 1. 优先从JSON文件读取需求树
     parse_json_file = os.path.join(
         os.path.dirname(os.path.dirname(__file__)), 
         'parse_results', 
@@ -30,14 +28,12 @@ def export_requirements():
         with open(parse_json_file, 'r', encoding='utf-8') as f:
             req_tree = json.load(f)
     
-    # 2. 如果JSON文件不存在，从数据库读取
     if not req_tree:
         requirement_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
         if not requirement_tree:
             return jsonify({'error': 'Requirement tree not found'}), 404
         req_tree = requirement_tree.tree_json
     
-    # 3. 读取验证结果
     validation_results = None
     validation_file = os.path.join(
         os.path.dirname(os.path.dirname(__file__)), 
@@ -50,13 +46,11 @@ def export_requirements():
         with open(validation_file, 'r', encoding='utf-8') as f:
             validation_results = json.load(f)
     
-    # 4. 构建验证结果字典，方便匹配
     validation_map = {}
     if validation_results:
         for vr in validation_results:
             validation_map[vr.get('id')] = vr
     
-    # 5. 将树形结构转换为导出格式，并合并验证结果
     requirements = []
     req_id_counter = 1
     
@@ -67,7 +61,6 @@ def export_requirements():
         
         node_id = node.get('id', '')
         
-        # 获取验证结果
         validation = validation_map.get(node_id, {})
         
         requirement = {
@@ -82,14 +75,12 @@ def export_requirements():
         }
         requirements.append(requirement)
         
-        # 递归处理子节点
         children = node.get('children') or []
         for child in children:
             traverse_tree(child, req_id)
     
     traverse_tree(req_tree, 'root')
     
-    # 6. 导出为JSON
     export_filename = f"export_{doc_id}.json"
     export_path = os.path.join(EXPORT_OUTPUT_FOLDER, export_filename)
     
@@ -102,36 +93,4 @@ def export_requirements():
         'total_requirements': len(requirements),
         'requirements': requirements
     })
-
-@export_bp.route('/api/export/<doc_id>', methods=['GET'])
-def export_requirements_get(doc_id):
-    if not doc_id:
-        return jsonify({'error': 'doc_id is required'}), 400
     
-    # 读取已导出的文件
-    export_filename = f"export_{doc_id}.json"
-    export_path = os.path.join(EXPORT_OUTPUT_FOLDER, export_filename)
-    
-    if not os.path.exists(export_path):
-        return jsonify({'error': 'Export file not found'}), 404
-    
-    return send_file(
-        export_path,
-        mimetype='application/json',
-        as_attachment=True,
-        download_name=f"requirements_{doc_id}.json"
-    )
-
-@export_bp.route('/api/export/list', methods=['GET'])
-def list_exports():
-    files = []
-    for filename in os.listdir(EXPORT_OUTPUT_FOLDER):
-        if filename.endswith('.json'):
-            filepath = os.path.join(EXPORT_OUTPUT_FOLDER, filename)
-            files.append({
-                'filename': filename,
-                'doc_id': filename.replace('export_', '').replace('.json', ''),
-                'size': os.path.getsize(filepath),
-                'created_time': os.path.getctime(filepath)
-            })
-    return jsonify({'exports': files})

@@ -80,3 +80,12 @@ poetry.lock
 
 # Yarn Integrity file
 .yarn-integrity
+
+integration_test_results/
+validate_results/
+export_results/
+parse_results/
+
+proxy
+
+prompt.md

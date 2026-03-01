@@ -4,71 +4,130 @@ from app.models import db, ValidationResult
 import os
 import requests
 import json
+import hashlib
 
 validate_bp = Blueprint('validate', __name__)
+
+VALIDATE_OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'validate_results')
+CACHE_INDEX_FILE = os.path.join(VALIDATE_OUTPUT_FOLDER, 'cache_index.json')
+
+if not os.path.exists(VALIDATE_OUTPUT_FOLDER):
+    os.makedirs(VALIDATE_OUTPUT_FOLDER)
+
+def load_cache_index():
+    """加载验证缓存索引"""
+    if os.path.exists(CACHE_INDEX_FILE):
+        with open(CACHE_INDEX_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def save_cache_index(cache_index):
+    """保存验证缓存索引"""
+    with open(CACHE_INDEX_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cache_index, f, ensure_ascii=False, indent=2)
+
+def compute_content_hash(req_tree):
+    """计算需求树内容的哈希值"""
+    content_str = json.dumps(req_tree, sort_keys=True, ensure_ascii=False)
+    hash_md5 = hashlib.md5()
+    hash_md5.update(content_str.encode('utf-8'))
+    return hash_md5.hexdigest()
 
 @validate_bp.route('/api/validate/<doc_id>', methods=['GET'])
 def validate_requirements(doc_id):
     if not doc_id:
         return jsonify({'error': 'doc_id is required'}), 400
     
-    # 查找文件
-    filepath = None
-    file_type = None
-    for filename in os.listdir(app.config['UPLOAD_FOLDER']):
-        if filename.startswith(doc_id):
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            # 这里简化处理，实际项目中应该从数据库或文件元数据中获取file_type
-            file_type = '需求规格说明'  # 假设默认是需求规格说明
-            break
+    # 1. 检查是否已有验证结果文件
+    validation_file = os.path.join(VALIDATE_OUTPUT_FOLDER, f"validation_{doc_id}.json")
+    if os.path.exists(validation_file):
+        with open(validation_file, 'r', encoding='utf-8') as f:
+            validation_results = json.load(f)
+        return jsonify({
+            'validation_results': validation_results,
+            'cached': True
+        })
     
-    if not filepath:
-        return jsonify({'error': 'Document not found'}), 404
+    # 2. 从parse结果读取需求树
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    json_file = os.path.join(base_dir, 'parse_results', f"{doc_id}.json")
     
-    # 选择对应的附录
-    appendix = 'appendix_j'  # 假设需求规格说明对应附录J
-    
-    # 加载规则（实际项目中应该从存储的规则树中加载）
-    rules = load_rules(appendix)
-    
-    # 从数据库中获取实际的需求树
-    from app.models import RequirementTree
-    requirement_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
-    
-    if not requirement_tree:
-        # 如果数据库中没有，从JSON文件中读取
-        json_file = os.path.join(app.config.get('PARSE_OUTPUT_FOLDER', os.path.join(os.path.dirname(os.path.dirname(__file__)), 'parse_results')), f"{doc_id}.json")
-        if os.path.exists(json_file):
-            with open(json_file, 'r', encoding='utf-8') as f:
-                req_tree = json.load(f)
-        else:
-            return jsonify({'error': 'Requirement tree not found in database or file'}), 404
+    if os.path.exists(json_file):
+        with open(json_file, 'r', encoding='utf-8') as f:
+            req_tree = json.load(f)
     else:
+        # 从数据库读取
+        from app.models import RequirementTree
+        requirement_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
+        if not requirement_tree:
+            return jsonify({'error': 'Requirement tree not found'}), 404
         req_tree = requirement_tree.tree_json
     
-    # 执行批处理验证
+    # 3. 检查验证缓存
+    content_hash = compute_content_hash(req_tree)
+    cache_index = load_cache_index()
+    
+    if content_hash in cache_index:
+        cached_doc_id = cache_index[content_hash]
+        cached_validation_file = os.path.join(VALIDATE_OUTPUT_FOLDER, f"validation_{cached_doc_id}.json")
+        if os.path.exists(cached_validation_file):
+            print(f"发现相同需求树，已缓存验证结果 doc_id: {cached_doc_id}")
+            
+            with open(cached_validation_file, 'r', encoding='utf-8') as f:
+                validation_results = json.load(f)
+            
+            # 保存当前doc_id的验证结果
+            with open(validation_file, 'w', encoding='utf-8') as f:
+                json.dump(validation_results, f, ensure_ascii=False, indent=2)
+            
+            # 保存到数据库
+            result = ValidationResult(
+                doc_id=doc_id,
+                result_json=validation_results,
+                model_used=app.config['API_MODEL_DEFAULT']
+            )
+            db.session.add(result)
+            db.session.commit()
+            
+            return jsonify({
+                'validation_results': validation_results,
+                'cached': True,
+                'cached_from': cached_doc_id
+            })
+    
+    # 4. 执行验证
+    rules = load_rules('appendix_j')
     validation_results = validate_batch(req_tree, rules)
+    
+    # 5. 保存验证结果
+    with open(validation_file, 'w', encoding='utf-8') as f:
+        json.dump(validation_results, f, ensure_ascii=False, indent=2)
+    
+    # 更新缓存索引
+    cache_index[content_hash] = doc_id
+    save_cache_index(cache_index)
     
     # 保存到数据库
     result = ValidationResult(
         doc_id=doc_id,
         result_json=validation_results,
-        model_used=app.config['API_MODEL_DEFAULT']  # 使用真实的模型名称
+        model_used=app.config['API_MODEL_DEFAULT']
     )
     db.session.add(result)
     db.session.commit()
     
-    return jsonify({'validation_results': validation_results})
+    return jsonify({
+        'validation_results': validation_results,
+        'cached': False
+    })
 
 def load_rules(appendix):
     """加载附录规则，构建规则树"""
     if appendix == 'appendix_j':
-        # 从文件中加载附录J的内容
         appendix_file = os.path.join(app.config['APPENDICES_FOLDER'], '438C-2021附录J.txt')
         if os.path.exists(appendix_file):
             return build_rule_tree_from_file(appendix_file)
         else:
-            # 如果文件不存在，使用默认规则
             return get_default_appendix_j_rules()
     return {}
 
@@ -78,7 +137,6 @@ def build_rule_tree_from_file(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # 解析附录J内容，构建规则树
         rules = {}
         lines = content.strip().split('\n')
         
@@ -90,23 +148,17 @@ def build_rule_tree_from_file(file_path):
             if not line:
                 continue
             
-            # 匹配章节标题（如 "1范围" 或 "3.2CSCI能力需求"）
             import re
             section_match = re.match(r'^(\d+(\.\d+)*)\s*(.+)$', line)
             if section_match:
-                # 保存当前章节的内容
                 if current_section:
-                    # 无论是否是子章节，都直接保存
                     rules[current_section] = ' '.join(current_content)
                 
-                # 开始新章节
                 current_section = section_match.group(1)
                 current_content = [section_match.group(3)]
             else:
-                # 章节内容
                 current_content.append(line)
         
-        # 保存最后一个章节的内容
         if current_section:
             rules[current_section] = ' '.join(current_content)
         
@@ -133,7 +185,7 @@ def get_default_appendix_j_rules():
         '3.7': '保密性（Security）需求：（若有）本条应指明与维护保密性有关的CSCI需求。（若适用）这些需求应包括：CSCI必须在其中运行的保密性环境、所提供的保密性的类型和级别、CSCI必须经受的保密性风险、减少此类风险所需的安全措施、必须遵循的保密性政策、CSCI必须具备的保密性责任、保密性认证认可必须满足的准则等。',
         '3.8': '安全性（Safety）需求：（若有）本条应指明关于防止或尽可能降低对人员、财产和物理环境产生意外危险的CSCI安全性需求。例子包括：CSCI必须提供的安全措施，以便防止意外动作（例如意外地发出一个"自动导航关闭"命令）和无动作（例如发出"自动导航关闭"命令失败）。本条还应包括关于系统核部件的CSCI需求（若有），若适用应包括预防意外爆炸以及与核安全规则保持一致等方面的需求。',
         '3.9': 'CSCI环境适应性需求：（若有）本条应指明CSCI的运行环境需求，例如运行CSCI的计算机硬件和操作系统（对计算机资源的其他需求见3.11）。',
-        '3.10': '其他质量特性：本条应指明合同规定的或由更高一层规格说明派生出的CSCI其他质量特性方面的需求，其中包括：可靠性、测试性、维护性等。',
+        '3.10': '其他质量特性：本条应指明合同规定的或由更高一层规格说明派生出的CSCI其他质量特性方面的需求，其中包括：可靠性、测试性，维护性等。',
         '3.11': '计算机资源需求：本条应指明CSCI必须使用的计算机硬件的需求、计算机硬件资源使用需求、计算机软件需求和计算机通信需求。',
         '3.12': '设计和实现约束：本条应指明约束CSCI的设计和实现的需求（若有）。这些需求可引用相应的商用或军用标准和规范来指定。',
         '3.13': '人员相关需求：（若有）本条应描述CSCI需求，包括与CSCI使用或保障人员有关的容纳人员的数量、技能等级、工作周期、必需的训练以及其他的信息，例如要求允许多少用户同时工作，以及内置的帮助和培训短片等方面的需求：也包括施加于CSCI的人机工程需求（若有）。',
@@ -147,68 +199,21 @@ def get_default_appendix_j_rules():
         '6': '注释：本章应包括有助于了解文档的所有信息（例如：背景、术语、缩略语或公式）。'
     }
 
-def call_deepseek_api(prompt, model, api_key, api_url):
-    """调用DeepSeek大模型API"""
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {api_key}'
-    }
-    
-    data = {
-        'model': model,
-        'messages': [
-            {
-                'role': 'system',
-                'content': '你是一个专业的需求文档审查专家，精通软件工程和需求分析。'
-            },
-            {
-                'role': 'user',
-                'content': prompt
-            }
-        ],
-        'temperature': 0.3,
-        'max_tokens': 1000
-    }
-    
-    try:
-        # 创建会话并强制跳过代理设置
-        session = requests.Session()
-        session.trust_env = False  # 不使用系统环境变量中的代理设置
-        
-        response = session.post(
-            api_url + '/chat/completions',
-            headers=headers,
-            json=data,
-            timeout=app.config.get('API_TIMEOUT', 30)
-        )
-        response.raise_for_status()
-        result = response.json()
-        return result['choices'][0]['message']['content']
-    except Exception as e:
-        print(f"API调用失败: {str(e)}")
-        # 返回一个合理的默认JSON格式结果，而不是错误信息
-        return '{"result": true, "reason": "由于网络原因，大模型验证暂时不可用，默认标记为合规。"}'
-
-
-BATCH_SIZE = 10  # 每批验证的节点数量
+BATCH_SIZE = 10
 
 def validate_batch(req_tree, rules):
     """批处理验证需求树"""
-    # 收集所有需要验证的节点
     nodes = []
     collect_nodes(req_tree, nodes)
     
     print(f"收集到 {len(nodes)} 个节点进行验证")
     
-    # 如果没有节点，返回空结果
     if not nodes:
         return []
     
-    # 跳过根节点
     if nodes and nodes[0].get('id') == 'root':
         nodes = nodes[1:]
     
-    # 分批验证
     all_results = []
     total_batches = (len(nodes) + BATCH_SIZE - 1) // BATCH_SIZE
     
@@ -219,10 +224,8 @@ def validate_batch(req_tree, rules):
         
         print(f"验证第 {batch_idx + 1}/{total_batches} 批 ({start_idx + 1}-{end_idx} 个节点)...")
         
-        # 构造当前批次的提示词
         prompt = construct_validation_prompt(batch_nodes, rules)
         
-        # 调用大模型API
         model_response = call_deepseek_api(
             prompt,
             app.config['API_MODEL_DEFAULT'],
@@ -230,11 +233,9 @@ def validate_batch(req_tree, rules):
             app.config['API_URL_DEFAULT']
         )
         
-        # 解析大模型响应
         try:
             print(f"API响应: {model_response[:200]}...")
             
-            # 清理响应内容
             cleaned_response = model_response.strip()
             
             if cleaned_response.startswith('[') and not cleaned_response.endswith(']'):
@@ -262,7 +263,6 @@ def validate_batch(req_tree, rules):
             print(f"解析响应失败: {str(e)}")
             all_results.extend(generate_default_results(batch_nodes))
     
-    # 添加根节点验证结果
     root_result = {
         'id': 'root',
         'name': req_tree.get('label', 'root'),
@@ -282,7 +282,6 @@ def collect_nodes(node, nodes, parent_id=None):
         'parent_id': parent_id
     })
     
-    # 递归收集子节点，处理 children 为 None 的情况
     children = node.get('children')
     if children is None:
         children = []
@@ -313,9 +312,7 @@ def construct_validation_prompt(nodes, rules):
 
 """
     
-    # 添加需要验证的节点，按照标题号逐条验证
     for i, node in enumerate(nodes):
-        # 尝试从节点名称中提取标题号
         title_number = None
         import re
         original_text = node.get('original_text') or ''
@@ -323,21 +320,18 @@ def construct_validation_prompt(nodes, rules):
         if match:
             title_number = match.group(1)
         
-        # 查找对应的规则
         rule = '无对应规则'
-        # 首先根据标题号查找规则
         if title_number:
             if title_number in rules:
                 rule = rules[title_number]
             else:
-                # 尝试查找最接近的父级规则
                 parts = title_number.split('.')
                 for j in range(len(parts)-1, 0, -1):
                     parent_title = '.'.join(parts[:j])
                     if parent_title in rules:
                         rule = rules[parent_title]
                         break
-        # 如果根据标题号找不到规则，尝试根据名称查找
+        
         if rule == '无对应规则':
             rule = rules.get(node['name'], '无对应规则')
         
@@ -355,6 +349,46 @@ def construct_validation_prompt(nodes, rules):
     prompt += "]"
     
     return prompt
+
+def call_deepseek_api(prompt, model, api_key, api_url):
+    """调用DeepSeek大模型API"""
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {api_key}'
+    }
+    
+    data = {
+        'model': model,
+        'messages': [
+            {
+                'role': 'system',
+                'content': '你是一个专业的需求文档审查专家，精通软件工程和需求分析。'
+            },
+            {
+                'role': 'user',
+                'content': prompt
+            }
+        ],
+        'temperature': 0.3,
+        'max_tokens': 1000
+    }
+    
+    try:
+        session = requests.Session()
+        session.trust_env = False
+        
+        response = session.post(
+            api_url + '/chat/completions',
+            headers=headers,
+            json=data,
+            timeout=app.config.get('API_TIMEOUT', 30)
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result['choices'][0]['message']['content']
+    except Exception as e:
+        print(f"API调用失败: {str(e)}")
+        return '{"result": true, "reason": "由于网络原因，大模型验证暂时不可用，默认标记为合规。"}'
 
 def generate_default_results(nodes):
     """生成默认验证结果"""

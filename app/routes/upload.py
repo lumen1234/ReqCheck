@@ -2,9 +2,19 @@ from flask import Blueprint, request, jsonify
 from app import app
 from app.models import db, Document, RequirementTree, ValidationResult
 import os
-import uuid
+import hashlib
 
 upload_bp = Blueprint('upload', __name__)
+
+
+def compute_file_hash(filepath):
+    """计算文件的MD5哈希值"""
+    hash_md5 = hashlib.md5()
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
 
 @upload_bp.route('/api/upload', methods=['POST'])
 def upload_file():
@@ -17,27 +27,61 @@ def upload_file():
         return jsonify({'error': 'File type not allowed'}), 400
     
     file_type = request.form.get('file_type', 'other')
-    doc_id = str(uuid.uuid4())
-    filename = f"{doc_id}_{file.filename}"
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
     
-    # 保存到数据库
-    document = Document(
-        id=doc_id,
-        filename=file.filename,
-        file_type=file_type,
-        file_path=filepath
-    )
-    db.session.add(document)
-    db.session.commit()
-    
-    return jsonify({
-        'doc_id': doc_id,
-        'filename': file.filename,
-        'file_type': file_type,
-        'filepath': filepath
-    })
+    temp_filepath = None
+    try:
+        import uuid
+        temp_filename = f"temp_{uuid.uuid4()}_{file.filename}"
+        temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
+        file.save(temp_filepath)
+        
+        file_hash = compute_file_hash(temp_filepath)
+        doc_id = file_hash
+        
+        existing_doc = Document.query.filter_by(id=doc_id).first()
+        
+        if existing_doc and os.path.exists(existing_doc.file_path):
+            os.remove(temp_filepath)
+            
+            return jsonify({
+                'doc_id': existing_doc.id,
+                'filename': existing_doc.filename,
+                'file_type': existing_doc.file_type,
+                'filepath': existing_doc.file_path,
+                'cached': True,
+                'message': '文件已存在，返回已有文档'
+            })
+        
+        if existing_doc:
+            db.session.delete(existing_doc)
+            db.session.commit()
+        
+        filename = f"{doc_id}_{file.filename}"
+        final_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        
+        os.rename(temp_filepath, final_filepath)
+        
+        document = Document(
+            id=doc_id,
+            filename=file.filename,
+            file_type=file_type,
+            file_path=final_filepath
+        )
+        db.session.add(document)
+        db.session.commit()
+        
+        return jsonify({
+            'doc_id': doc_id,
+            'filename': file.filename,
+            'file_type': file_type,
+            'filepath': final_filepath,
+            'cached': False
+        })
+        
+    except Exception as e:
+        if temp_filepath and os.path.exists(temp_filepath):
+            os.remove(temp_filepath)
+        return jsonify({'error': str(e)}), 500
 
 @upload_bp.route('/api/delete/<doc_id>', methods=['DELETE'])
 def delete_document(doc_id):

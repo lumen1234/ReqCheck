@@ -1,4 +1,0 @@
-#没有颜色（Powershell）
-set http_proxy=http://127.0.0.1:7897 & set https_proxy=http://127.0.0.1:7897
-#有颜色（cmd）
-$Env:http_proxy="http://127.0.0.1:7897";$Env:https_proxy="http://127.0.0.1:7897" 
