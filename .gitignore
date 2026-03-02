@@ -32,7 +32,8 @@ instance/
 *.db
 
 # Uploads
-uploads/
+uploads/*
+!uploads/.gitkeep
 
 # Logs
 logs/
