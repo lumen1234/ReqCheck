@@ -16,6 +16,11 @@ def compute_file_hash(filepath):
     return hash_md5.hexdigest()
 
 
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+
 @upload_bp.route('/api/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -106,17 +111,18 @@ def delete_document(doc_id):
     
     # 2. 删除数据库记录
     try:
-        db.session.delete(document)
-        
-        # 3. 删除相关的需求树记录
+        # 先删除相关的需求树记录
         req_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
         if req_tree:
             db.session.delete(req_tree)
         
-        # 4. 删除相关的验证结果记录
+        # 再删除相关的验证结果记录
         validation_result = ValidationResult.query.filter_by(doc_id=doc_id).first()
         if validation_result:
             db.session.delete(validation_result)
+        
+        # 最后删除文档本身
+        db.session.delete(document)
         
         db.session.commit()
     except Exception as e:
@@ -176,7 +182,3 @@ def list_documents():
             for doc in documents
         ]
     })
-
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']

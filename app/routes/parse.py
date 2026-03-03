@@ -238,12 +238,18 @@ def parse_document(doc_id):
             
             output_path = save_json_to_file(doc_id, req_tree)
             
-            # 保存到数据库
-            tree = RequirementTree(
-                doc_id=doc_id,
-                tree_json=req_tree
-            )
-            db.session.add(tree)
+            # 检查是否已有RequirementTree记录
+            existing_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
+            if existing_tree:
+                # 更新现有记录
+                existing_tree.tree_json = req_tree
+            else:
+                # 创建新记录
+                tree = RequirementTree(
+                    doc_id=doc_id,
+                    tree_json=req_tree
+                )
+                db.session.add(tree)
             
             if document:
                 document.status = '已解析'

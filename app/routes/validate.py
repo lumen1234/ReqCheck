@@ -81,12 +81,19 @@ def validate_requirements(doc_id):
                 json.dump(validation_results, f, ensure_ascii=False, indent=2)
             
             # 保存到数据库
-            result = ValidationResult(
-                doc_id=doc_id,
-                result_json=validation_results,
-                model_used=app.config['API_MODEL_DEFAULT']
-            )
-            db.session.add(result)
+            existing_result = ValidationResult.query.filter_by(doc_id=doc_id).first()
+            if existing_result:
+                # 更新现有记录
+                existing_result.result_json = validation_results
+                existing_result.model_used = app.config['API_MODEL_DEFAULT']
+            else:
+                # 创建新记录
+                result = ValidationResult(
+                    doc_id=doc_id,
+                    result_json=validation_results,
+                    model_used=app.config['API_MODEL_DEFAULT']
+                )
+                db.session.add(result)
             db.session.commit()
             
             return jsonify({
