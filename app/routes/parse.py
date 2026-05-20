@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, send_file
 from app import app
-from app.models import db, Document as DocModel, RequirementTree
+from app.models import db, Document as DocModel, RequirementTree, LLMConfig
 import os
 import re
 import json
@@ -87,7 +87,7 @@ def call_llm_api(prompt, model, api_key, api_url, retries=3):
                 api_url + '/chat/completions',
                 headers=headers,
                 json=data,
-                timeout=120
+                timeout=app.config.get('API_TIMEOUT', 270)
             )
             response.raise_for_status()
             result = response.json()
@@ -146,9 +146,10 @@ def parse_document_with_llm(text):
 
 请返回JSON："""
 
-    model = app.config.get('API_MODEL_DEFAULT', 'deepseek-chat')
-    api_key = app.config.get('API_KEY_DEFAULT')
-    api_url = app.config.get('API_URL_DEFAULT', 'https://api.deepseek.com')
+    cfg = LLMConfig.query.first()
+    model = cfg.model if cfg else app.config.get('API_MODEL_DEFAULT', 'deepseek-chat')
+    api_key = cfg.api_key if cfg else app.config.get('API_KEY_DEFAULT')
+    api_url = cfg.base_url if cfg else app.config.get('API_URL_DEFAULT', 'https://api.deepseek.com')
     
     response = call_llm_api(prompt, model, api_key, api_url)
     

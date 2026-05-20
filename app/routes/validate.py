@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from app import app
-from app.models import db, ValidationResult
+from app.models import db, ValidationResult, LLMConfig
 import os
 import requests
 import json
@@ -81,17 +81,19 @@ def validate_requirements(doc_id):
                 json.dump(validation_results, f, ensure_ascii=False, indent=2)
             
             # 保存到数据库
+            _cfg = LLMConfig.query.first()
+            _model_name = _cfg.model if _cfg else app.config['API_MODEL_DEFAULT']
             existing_result = ValidationResult.query.filter_by(doc_id=doc_id).first()
             if existing_result:
                 # 更新现有记录
                 existing_result.result_json = validation_results
-                existing_result.model_used = app.config['API_MODEL_DEFAULT']
+                existing_result.model_used = _model_name
             else:
                 # 创建新记录
                 result = ValidationResult(
                     doc_id=doc_id,
                     result_json=validation_results,
-                    model_used=app.config['API_MODEL_DEFAULT']
+                    model_used=_model_name
                 )
                 db.session.add(result)
             db.session.commit()
@@ -115,10 +117,11 @@ def validate_requirements(doc_id):
     save_cache_index(cache_index)
     
     # 保存到数据库
+    _cfg = LLMConfig.query.first()
     result = ValidationResult(
         doc_id=doc_id,
         result_json=validation_results,
-        model_used=app.config['API_MODEL_DEFAULT']
+        model_used=_cfg.model if _cfg else app.config['API_MODEL_DEFAULT']
     )
     db.session.add(result)
     db.session.commit()
@@ -233,11 +236,15 @@ def validate_batch(req_tree, rules):
         
         prompt = construct_validation_prompt(batch_nodes, rules)
         
+        _cfg = LLMConfig.query.first()
+        _model = _cfg.model if _cfg else app.config['API_MODEL_DEFAULT']
+        _api_key = _cfg.api_key if _cfg else app.config['API_KEY_DEFAULT']
+        _api_url = _cfg.base_url if _cfg else app.config['API_URL_DEFAULT']
         model_response = call_deepseek_api(
             prompt,
-            app.config['API_MODEL_DEFAULT'],
-            app.config['API_KEY_DEFAULT'],
-            app.config['API_URL_DEFAULT']
+            _model,
+            _api_key,
+            _api_url
         )
         
         try:
@@ -388,7 +395,7 @@ def call_deepseek_api(prompt, model, api_key, api_url):
             api_url + '/chat/completions',
             headers=headers,
             json=data,
-            timeout=app.config.get('API_TIMEOUT', 30)
+            timeout=app.config.get('API_TIMEOUT', 270)
         )
         response.raise_for_status()
         result = response.json()

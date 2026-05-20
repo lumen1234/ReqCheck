@@ -18,4 +18,4 @@ API_KEY_DEFAULT = "sk-ba7862f60e3e460e88e17dad82e34982"
 API_URL_DEFAULT = "https://api.deepseek.com"
 API_MODEL_DEFAULT = "deepseek-chat"
 
-API_TIMEOUT = 60  # 超时时间（秒）
+API_TIMEOUT = 270  # 超时时间（秒）

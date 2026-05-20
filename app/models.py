@@ -26,3 +26,9 @@ class ValidationResult(db.Model):
     result_json = db.Column(db.JSON, nullable=False)
     validate_time = db.Column(db.DateTime, default=datetime.utcnow)
     model_used = db.Column(db.String(100), nullable=True)
+
+class LLMConfig(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    api_key = db.Column(db.String(256), nullable=False)
+    base_url = db.Column(db.String(256), nullable=False)
+    model = db.Column(db.String(128), nullable=False)
