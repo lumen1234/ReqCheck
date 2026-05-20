@@ -77,7 +77,8 @@ def call_llm_api(prompt, model, api_key, api_url, retries=3):
             }
         ],
         'temperature': 0.3,
-        'max_tokens': 8000
+        'max_tokens': 8000,
+        'stream': True
     }
     
     for attempt in range(retries):
@@ -87,13 +88,35 @@ def call_llm_api(prompt, model, api_key, api_url, retries=3):
                 api_url + '/chat/completions',
                 headers=headers,
                 json=data,
-                timeout=app.config.get('API_TIMEOUT', 270)
+                timeout=app.config.get('API_TIMEOUT', 270),
+                stream=True
             )
             response.raise_for_status()
-            result = response.json()
-            return result['choices'][0]['message']['content']
+            
+            chunks = []
+            print("模型输出：", end='', flush=True)
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                line = line.decode('utf-8') if isinstance(line, bytes) else line
+                if not line.startswith('data:'):
+                    continue
+                payload = line[len('data:'):].strip()
+                if payload == '[DONE]':
+                    break
+                try:
+                    chunk_data = json.loads(payload)
+                    delta = chunk_data['choices'][0].get('delta', {})
+                    content = delta.get('content', '')
+                    if content:
+                        print(content, end='', flush=True)
+                        chunks.append(content)
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
+            print()  # 换行
+            return ''.join(chunks)
         except Exception as e:
-            print(f"API调用失败 (尝试 {attempt+1}/{retries}): {str(e)}")
+            print(f"\nAPI调用失败 (尝试 {attempt+1}/{retries}): {str(e)}")
             if attempt < retries - 1:
                 import time
                 time.sleep(2)
