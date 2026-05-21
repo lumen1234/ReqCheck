@@ -12,7 +12,7 @@ class Document(db.Model):
     status = db.Column(db.String(50), default='已上传')
     
     requirement_trees = db.relationship('RequirementTree', backref='document', lazy=True)
-    validation_results = db.relationship('ValidationResult', backref='document', lazy=True)
+    # validation_results = db.relationship('ValidationResult', backref='document', lazy=True)
 
 class RequirementTree(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -22,7 +22,7 @@ class RequirementTree(db.Model):
 
 class ValidationResult(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    doc_id = db.Column(db.String(32), db.ForeignKey('document.id'), nullable=False)
+    doc_id = db.Column(db.String(32), nullable=False)
     result_json = db.Column(db.JSON, nullable=False)
     validate_time = db.Column(db.DateTime, default=datetime.utcnow)
     model_used = db.Column(db.String(100), nullable=True)

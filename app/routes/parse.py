@@ -80,7 +80,7 @@ def call_llm_api(prompt, model, api_key, api_url, retries=3):
         'max_tokens': 8000,
         'stream': True
     }
-    
+    print (prompt)
     for attempt in range(retries):
         try:
             session = requests.Session()

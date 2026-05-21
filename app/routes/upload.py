@@ -38,16 +38,16 @@ def upload_file():
         import uuid
         temp_filename = f"temp_{uuid.uuid4()}_{file.filename}"
         temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
         file.save(temp_filepath)
         
         file_hash = compute_file_hash(temp_filepath)
         doc_id = file_hash
         
         existing_doc = Document.query.filter_by(id=doc_id).first()
-        
         if existing_doc and os.path.exists(existing_doc.file_path):
             os.remove(temp_filepath)
-            
+            # print("logging here")
             return jsonify({
                 'doc_id': existing_doc.id,
                 'filename': existing_doc.filename,
@@ -58,9 +58,13 @@ def upload_file():
             })
         
         if existing_doc:
-            db.session.delete(existing_doc)
-            db.session.commit()
-        
+            print("logging here")
+            try:
+                db.session.delete(existing_doc)
+                db.session.commit()
+            except:
+                import traceback
+                traceback.print_exc()
         filename = f"{doc_id}_{file.filename}"
         final_filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         
@@ -84,6 +88,8 @@ def upload_file():
         })
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         if temp_filepath and os.path.exists(temp_filepath):
             os.remove(temp_filepath)
         return jsonify({'error': str(e)}), 500
