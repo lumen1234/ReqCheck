@@ -1,15 +1,19 @@
 from flask import Blueprint, request, jsonify, send_file
 from app import app
 from app.models import RequirementTree, ValidationResult
+from app.services.workspace import (
+    export_results_folder,
+    parse_results_folder,
+    validate_results_folder,
+)
 import os
 import json
 
 export_bp = Blueprint('export', __name__)
 
-EXPORT_OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'export_results')
 
-if not os.path.exists(EXPORT_OUTPUT_FOLDER):
-    os.makedirs(EXPORT_OUTPUT_FOLDER)
+def _export_output_folder():
+    return export_results_folder(app)
 
 @export_bp.route('/api/export/<doc_id>', methods=['GET'])
 def export_requirements(doc_id):
@@ -18,11 +22,7 @@ def export_requirements(doc_id):
     
     req_tree = None
     
-    parse_json_file = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), 
-        'parse_results', 
-        f'{doc_id}.json'
-    )
+    parse_json_file = os.path.join(parse_results_folder(app), f'{doc_id}.json')
     
     if os.path.exists(parse_json_file):
         with open(parse_json_file, 'r', encoding='utf-8') as f:
@@ -35,12 +35,7 @@ def export_requirements(doc_id):
         req_tree = requirement_tree.tree_json
     
     validation_results = None
-    validation_file = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), 
-        '..', 
-        'validate_results', 
-        f'validation_{doc_id}.json'
-    )
+    validation_file = os.path.join(validate_results_folder(app), f'validation_{doc_id}.json')
     
     if os.path.exists(validation_file):
         with open(validation_file, 'r', encoding='utf-8') as f:
@@ -82,7 +77,7 @@ def export_requirements(doc_id):
     traverse_tree(req_tree, 'root')
     
     export_filename = f"export_{doc_id}.json"
-    export_path = os.path.join(EXPORT_OUTPUT_FOLDER, export_filename)
+    export_path = os.path.join(_export_output_folder(), export_filename)
     
     with open(export_path, 'w', encoding='utf-8') as f:
         json.dump(requirements, f, ensure_ascii=False, indent=2)

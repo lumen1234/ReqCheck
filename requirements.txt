@@ -2,4 +2,7 @@ Flask
 Flask-SQLAlchemy
 SQLAlchemy
 python-docx
+Pillow
 requests
+markdown-it-py
+mdit-py-plugins

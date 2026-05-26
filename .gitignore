@@ -44,9 +44,11 @@ logs/
 .env.local
 .env.*.local
 
-# Build files
+# Build / workspace
 /build/
-/dist/
+/frontend/node_modules/
+/frontend/dist/
+/local_workspaces/
 *.egg-info/
 
 # Test files
@@ -86,6 +88,7 @@ integration_test_results/
 validate_results/
 export_results/
 parse_results/
+parse_assets/
 
 proxy
 

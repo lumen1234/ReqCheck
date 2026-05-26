@@ -130,3 +130,18 @@ def ensure_browser_image(data: bytes, ext: str = '.png') -> Tuple[bytes, str]:
             return png, '.png'
 
     return data, ext
+
+
+def load_browser_image_file(filepath: str) -> Tuple[bytes, str]:
+    """读取磁盘图片；若为 EMF/WMF 则尝试转为 PNG 并回写。"""
+    with open(filepath, 'rb') as f:
+        data = f.read()
+    ext = os.path.splitext(filepath)[1] or '.png'
+    png_data, out_ext = ensure_browser_image(data, ext)
+    if png_data[:4] == b'\x89PNG' and data[:4] != b'\x89PNG':
+        try:
+            with open(filepath, 'wb') as f:
+                f.write(png_data)
+        except OSError:
+            pass
+    return png_data, out_ext

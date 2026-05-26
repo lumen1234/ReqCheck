@@ -1,368 +1,454 @@
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, make_response
+
 from app import app
-from app.models import db, Document as DocModel, RequirementTree, LLMConfig
+
+from app.models import db, Document as DocModel, RequirementTree
+
+from app.parsers import parse_document_to_tree, compute_document_text_hash
+
+from app.parsers.content_render import enrich_tree_display
+
+from app.parsers.image_convert import load_browser_image_file, sniff_image_format
+
+from app.services import project_service
+
+from app.services.workspace import parse_assets_folder, parse_results_folder
+
 import os
-import re
+
 import json
-import requests
-import hashlib
-from docx import Document
+
+
 
 parse_bp = Blueprint('parse', __name__)
 
-PARSE_OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'parse_results')
-CACHE_INDEX_FILE = os.path.join(PARSE_OUTPUT_FOLDER, 'cache_index.json')
 
-if not os.path.exists(PARSE_OUTPUT_FOLDER):
-    os.makedirs(PARSE_OUTPUT_FOLDER)
+
+
+
+def _parse_output_folder():
+
+    return parse_results_folder(app)
+
+
+
+
+
+def _assets_folder():
+
+    return parse_assets_folder(app)
+
+
+
+
+
+def _cache_index_file():
+
+    return os.path.join(_parse_output_folder(), 'cache_index.json')
+
+
+
+
 
 def load_cache_index():
-    """加载缓存索引"""
-    if os.path.exists(CACHE_INDEX_FILE):
-        with open(CACHE_INDEX_FILE, 'r', encoding='utf-8') as f:
+
+    path = _cache_index_file()
+
+    if os.path.exists(path):
+
+        with open(path, 'r', encoding='utf-8') as f:
+
             return json.load(f)
+
     return {}
 
+
+
+
+
 def save_cache_index(cache_index):
-    """保存缓存索引"""
-    with open(CACHE_INDEX_FILE, 'w', encoding='utf-8') as f:
+
+    with open(_cache_index_file(), 'w', encoding='utf-8') as f:
+
         json.dump(cache_index, f, ensure_ascii=False, indent=2)
 
-def compute_file_hash(filepath):
-    """计算文件的MD5哈希值"""
-    hash_md5 = hashlib.md5()
-    with open(filepath, 'rb') as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
 
-def compute_text_hash(filepath):
-    """计算文档文本内容的MD5哈希值（更准确检测相同文档）"""
-    text = extract_text_from_docx(filepath)
-    hash_md5 = hashlib.md5()
-    hash_md5.update(text.encode('utf-8'))
-    return hash_md5.hexdigest()
 
-def extract_text_from_docx(filepath):
-    doc = Document(filepath)
-    text_lines = []
-    for para in doc.paragraphs:
-        text = para.text.strip()
-        if text:
-            text_lines.append(text)
-    return '\n'.join(text_lines)
 
-def compute_text_hash(text):
-    """计算文本内容的MD5哈希值"""
-    hash_md5 = hashlib.md5()
-    hash_md5.update(text.encode('utf-8'))
-    return hash_md5.hexdigest()
 
-def call_llm_api(prompt, model, api_key, api_url, retries=3):
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {api_key}'
-    }
-    
-    data = {
-        'model': model,
-        'messages': [
-            {
-                'role': 'system',
-                'content': '你是一个专业的需求文档分析助手，擅长解析软件需求规格说明书。'
-            },
-            {
-                'role': 'user',
-                'content': prompt
-            }
-        ],
-        'temperature': 0.3,
-        'max_tokens': 8000,
-        'stream': True
-    }
-    print (prompt)
-    for attempt in range(retries):
-        try:
-            session = requests.Session()
-            response = session.post(
-                api_url + '/chat/completions',
-                headers=headers,
-                json=data,
-                timeout=app.config.get('API_TIMEOUT', 270),
-                stream=True
-            )
-            response.raise_for_status()
-            
-            chunks = []
-            print("模型输出：", end='', flush=True)
-            for line in response.iter_lines():
-                if not line:
-                    continue
-                line = line.decode('utf-8') if isinstance(line, bytes) else line
-                if not line.startswith('data:'):
-                    continue
-                payload = line[len('data:'):].strip()
-                if payload == '[DONE]':
-                    break
-                try:
-                    chunk_data = json.loads(payload)
-                    delta = chunk_data['choices'][0].get('delta', {})
-                    content = delta.get('content', '')
-                    if content:
-                        print(content, end='', flush=True)
-                        chunks.append(content)
-                except (json.JSONDecodeError, KeyError, IndexError):
-                    continue
-            print()  # 换行
-            return ''.join(chunks)
-        except Exception as e:
-            print(f"\nAPI调用失败 (尝试 {attempt+1}/{retries}): {str(e)}")
-            if attempt < retries - 1:
-                import time
-                time.sleep(2)
-    
-    return None
+def _prepare_tree_for_response(req_tree, doc_id: str):
 
-def parse_document_with_llm(text):
-    prompt = f"""请解析以下软件需求规格说明文档，识别出所有标题和对应的内容。
+    """补全 content_html / display_title，兼容旧缓存 JSON。"""
 
-请严格按照以下JSON格式返回，不要包含任何其他内容：
-{{
-  "tree": {{
-    "id": "root",
-    "label": "文档名称",
-    "content": null,
-    "level": 0,
-    "v_status": true,
-    "e_status": "pending",
-    "children": [
-      {{
-        "id": "node_编号",
-        "label": "标题名称",
-        "content": "该标题下的具体内容，如果没有内容则为null",
-        "level": 层级数字,
-        "v_status": true,
-        "e_status": "pass",
-        "children": [
-          {{
-            "id": "node_父编号_子编号",
-            "label": "子标题名称",
-            "content": "子标题下的内容",
-            "level": 层级数字,
-            "v_status": true,
-            "e_status": "pass",
-            "children": null
-          }}
-        ]
-      }}
-    ]
-  }}
-}}
+    if not req_tree:
 
-要求：
-1. 根据标题编号确定层级关系（如1是一级，1.1是二级，1.1.1是三级）
-2. 只在叶子节点（非标题节点）填写content，父标题节点的content为null
-3. 返回纯JSON格式，不要有markdown代码块标记
-4. 文档内容：
+        return req_tree
 
-{text}
+    enrich_tree_display(req_tree, doc_id)
 
-请返回JSON："""
+    return req_tree
 
-    cfg = LLMConfig.query.first()
-    model = cfg.model if cfg else app.config.get('API_MODEL_DEFAULT', 'deepseek-chat')
-    api_key = cfg.api_key if cfg else app.config.get('API_KEY_DEFAULT')
-    api_url = cfg.base_url if cfg else app.config.get('API_URL_DEFAULT', 'https://api.deepseek.com')
-    
-    response = call_llm_api(prompt, model, api_key, api_url)
-    
-    if response:
-        response = response.strip()
-        if response.startswith('```json'):
-            response = response[7:]
-        elif response.startswith('```'):
-            response = response[3:]
-        if response.endswith('```'):
-            response = response[:-3]
-        response = response.strip()
-        
-        try:
-            result = json.loads(response)
-            return result
-        except json.JSONDecodeError as e:
-            print(f"JSON解析失败: {str(e)}")
-            print(f"尝试修复截断的JSON...")
-            
-            match = re.search(r'\{[\s\S]*\}', response)
-            if match:
-                try:
-                    result = json.loads(match.group(0))
-                    print("JSON修复成功!")
-                    return result
-                except:
-                    pass
-            
-            print(f"原始响应: {response[:500]}")
-    
-    return None
+
+
+
 
 def save_json_to_file(doc_id, tree):
+
     output_filename = f"{doc_id}.json"
-    output_path = os.path.join(PARSE_OUTPUT_FOLDER, output_filename)
-    
+
+    output_path = os.path.join(_parse_output_folder(), output_filename)
+
     with open(output_path, 'w', encoding='utf-8') as f:
+
         json.dump(tree, f, ensure_ascii=False, indent=2)
-    
+
     return output_path
 
-@parse_bp.route('/api/parse/<doc_id>', methods=['GET'])
-def parse_document(doc_id):
-    if not doc_id:
-        return jsonify({'error': 'doc_id is required'}), 400
-    
-    # 检查是否已有解析结果
-    existing_json = os.path.join(PARSE_OUTPUT_FOLDER, f"{doc_id}.json")
-    if os.path.exists(existing_json):
-        with open(existing_json, 'r', encoding='utf-8') as f:
-            req_tree = json.load(f)
-        return jsonify({
-            'requirement_tree': req_tree,
-            'output_file': existing_json,
-            'cached': True
-        })
-    
-    document = DocModel.query.filter_by(id=doc_id).first()
-    if not document:
-        return jsonify({'error': 'Document not found'}), 404
-    
-    filepath = document.file_path
-    if not os.path.exists(filepath):
-        return jsonify({'error': 'File not found on disk'}), 404
-    
-    # 计算文档文本内容的哈希
-    text_hash = compute_text_hash(filepath)
-    print(f"文档内容哈希: {text_hash}")
-    
-    # 检查缓存
-    cache_index = load_cache_index()
-    
-    # 如果有相同的文档被解析过，直接返回缓存结果
-    if text_hash in cache_index:
-        cached_doc_id = cache_index[text_hash]
-        cached_json = os.path.join(PARSE_OUTPUT_FOLDER, f"{cached_doc_id}.json")
-        if os.path.exists(cached_json):
-            print(f"发现相同文档，已缓存 doc_id: {cached_doc_id}")
-            
-            # 复制缓存结果到新的doc_id
-            with open(cached_json, 'r', encoding='utf-8') as f:
-                req_tree = json.load(f)
-            
-            # 更新label为当前文档名
-            req_tree['label'] = document.filename
-            
-            output_path = save_json_to_file(doc_id, req_tree)
-            
-            # 检查是否已有RequirementTree记录
-            existing_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
-            if existing_tree:
-                # 更新现有记录
-                existing_tree.tree_json = req_tree
-            else:
-                # 创建新记录
-                tree = RequirementTree(
-                    doc_id=doc_id,
-                    tree_json=req_tree
-                )
-                db.session.add(tree)
-            
-            if document:
-                document.status = '已解析'
-            
-            db.session.commit()
-            
-            return jsonify({
-                'requirement_tree': req_tree,
-                'output_file': output_path,
-                'cached': True,
-                'cached_from': cached_doc_id
-            })
-    
-    print("正在使用大模型API解析文档...")
-    text = extract_text_from_docx(filepath)
-    result = parse_document_with_llm(text)
-    
-    if result and 'tree' in result:
-        req_tree = result['tree']
-        print("大模型解析成功")
-    else:
-        return jsonify({'error': '大模型解析失败，请检查API配置或网络连接'}), 500
-    
+
+
+
+
+def _persist_parse_result(doc_id, document, req_tree, text_hash, cache_index):
+
     output_path = save_json_to_file(doc_id, req_tree)
-    print(f"JSON已保存到: {output_path}")
-    
-    # 更新缓存索引
+
     cache_index[text_hash] = doc_id
+
     save_cache_index(cache_index)
-    
-    tree = RequirementTree(
-        doc_id=doc_id,
-        tree_json=req_tree
-    )
-    db.session.add(tree)
-    
+
+
+
+    existing_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
+
+    if existing_tree:
+
+        existing_tree.tree_json = req_tree
+
+    else:
+
+        db.session.add(RequirementTree(doc_id=doc_id, tree_json=req_tree))
+
+
+
     if document:
+
         document.status = '已解析'
-    
+
     db.session.commit()
-    
+
+    return output_path
+
+
+
+
+
+def _resolve_doc_for_parse(doc_id):
+
+    portal_project_id = request.args.get('portal_project_id') or None
+
+    resolved = project_service.resolve_document(doc_id, portal_project_id=portal_project_id)
+
+    if resolved:
+
+        document = DocModel.query.filter_by(id=doc_id).first()
+
+        return resolved.filepath, resolved.filename, document
+
+
+
+    document = DocModel.query.filter_by(id=doc_id).first()
+
+    if not document:
+
+        return None, None, None
+
+    if not os.path.exists(document.file_path):
+
+        return None, None, document
+
+    return document.file_path, document.filename, document
+
+
+
+
+
+@parse_bp.route('/api/parse/<doc_id>', methods=['GET'])
+
+def parse_document(doc_id):
+
+    if not doc_id:
+
+        return jsonify({'error': 'doc_id is required'}), 400
+
+
+
+    force = request.args.get('force', '').lower() in ('1', 'true', 'yes')
+
+    parse_dir = _parse_output_folder()
+
+    existing_json = os.path.join(parse_dir, f"{doc_id}.json")
+
+
+
+    if not force and os.path.exists(existing_json):
+
+        with open(existing_json, 'r', encoding='utf-8') as f:
+
+            req_tree = json.load(f)
+
+        req_tree = _prepare_tree_for_response(req_tree, doc_id)
+
+        return jsonify({
+
+            'requirement_tree': req_tree,
+
+            'output_file': existing_json,
+
+            'cached': True,
+
+        })
+
+
+
+    filepath, filename, document = _resolve_doc_for_parse(doc_id)
+
+    if not filepath:
+
+        return jsonify({'error': 'Document not found'}), 404
+
+
+
+    try:
+
+        text_hash = compute_document_text_hash(filepath)
+
+    except Exception as e:
+
+        return jsonify({'error': f'读取文档失败: {str(e)}'}), 400
+
+
+
+    print(f"文档内容哈希: {text_hash}")
+
+    cache_index = load_cache_index()
+
+    if force:
+        from app.parsers.asset_store import AssetStore
+        AssetStore.remove_doc_assets(doc_id, _assets_folder())
+
+    if not force and text_hash in cache_index:
+
+        cached_doc_id = cache_index[text_hash]
+
+        cached_json = os.path.join(parse_dir, f"{cached_doc_id}.json")
+
+        if os.path.exists(cached_json):
+
+            with open(cached_json, 'r', encoding='utf-8') as f:
+
+                req_tree = json.load(f)
+
+            req_tree['label'] = filename
+
+            req_tree = _prepare_tree_for_response(req_tree, doc_id)
+
+            output_path = _persist_parse_result(doc_id, document, req_tree, text_hash, cache_index)
+
+            return jsonify({
+
+                'requirement_tree': req_tree,
+
+                'output_file': output_path,
+
+                'cached': True,
+
+                'cached_from': cached_doc_id,
+
+            })
+
+
+
+    try:
+
+        print("正在使用规则引擎解析文档...")
+
+        req_tree = parse_document_to_tree(
+
+            filepath=filepath,
+
+            filename=filename,
+
+            doc_id=doc_id,
+
+            assets_base_folder=_assets_folder(),
+
+        )
+
+    except ValueError as e:
+
+        return jsonify({'error': str(e)}), 422
+
+    except Exception as e:
+
+        import traceback
+
+        traceback.print_exc()
+
+        return jsonify({'error': f'解析失败: {str(e)}'}), 500
+
+
+
+    output_path = _persist_parse_result(doc_id, document, req_tree, text_hash, cache_index)
+
+    print(f"解析完成，JSON已保存到: {output_path}")
+
+
+
     return jsonify({
+
         'requirement_tree': req_tree,
+
         'output_file': output_path,
-        'cached': False
+
+        'cached': False,
+
     })
+
+
+
+
+
+@parse_bp.route('/api/parse/<doc_id>/assets/<filename>', methods=['GET'])
+
+def get_parse_asset(doc_id, filename):
+
+    safe_name = os.path.basename(filename)
+
+    asset_path = os.path.join(_assets_folder(), doc_id, 'assets', safe_name)
+
+    if not os.path.isfile(asset_path):
+
+        return jsonify({'error': 'Asset not found'}), 404
+
+    try:
+        data, out_ext = load_browser_image_file(asset_path)
+    except OSError:
+        return jsonify({'error': 'Asset not readable'}), 500
+
+    if sniff_image_format(data) not in ('png', 'jpeg', 'gif'):
+        return jsonify({'error': 'Image format not supported in browser; re-parse with force=1'}), 415
+
+    ext = out_ext.lower() if out_ext.startswith('.') else f'.{out_ext.lower()}'
+    mimetype = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp',
+        '.svg': 'image/svg+xml',
+    }.get(ext, 'image/png')
+
+    resp = make_response(data)
+    resp.headers['Content-Type'] = mimetype
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Content-Length'] = str(len(data))
+    return resp
+
+
+
+
 
 @parse_bp.route('/api/parse/<doc_id>/download', methods=['GET'])
+
 def download_parse_result(doc_id):
-    output_filename = f"{doc_id}.json"
-    output_path = os.path.join(PARSE_OUTPUT_FOLDER, output_filename)
-    
+
+    output_path = os.path.join(_parse_output_folder(), f"{doc_id}.json")
+
     if not os.path.exists(output_path):
+
         return jsonify({'error': 'File not found'}), 404
-    
+
     return send_file(
+
         output_path,
+
         mimetype='application/json',
+
         as_attachment=True,
-        download_name=f"parse_result_{doc_id}.json"
+
+        download_name=f"parse_result_{doc_id}.json",
+
     )
 
+
+
+
+
 @parse_bp.route('/api/parse/results', methods=['GET'])
+
 def list_parse_results():
+
+    parse_dir = _parse_output_folder()
+
     files = []
-    for filename in os.listdir(PARSE_OUTPUT_FOLDER):
+
+    if not os.path.isdir(parse_dir):
+
+        return jsonify({'results': files})
+
+    for filename in os.listdir(parse_dir):
+
         if filename.endswith('.json') and filename != 'cache_index.json':
-            filepath = os.path.join(PARSE_OUTPUT_FOLDER, filename)
+
+            filepath = os.path.join(parse_dir, filename)
+
             files.append({
+
                 'filename': filename,
+
                 'doc_id': filename.replace('.json', ''),
+
                 'size': os.path.getsize(filepath),
-                'created_time': os.path.getctime(filepath)
+
+                'created_time': os.path.getctime(filepath),
+
             })
+
     return jsonify({'results': files})
 
+
+
+
+
 @parse_bp.route('/api/parse/cache/clear', methods=['POST'])
+
 def clear_cache():
-    """清除解析缓存"""
+
     cache_index = load_cache_index()
+
     cache_index.clear()
+
     save_cache_index(cache_index)
+
     return jsonify({'success': True, 'message': '缓存已清除'})
 
+
+
+
+
 @parse_bp.route('/api/parse/cache/stats', methods=['GET'])
+
 def cache_stats():
-    """查看缓存统计"""
+
     cache_index = load_cache_index()
+
     return jsonify({
+
         'cached_documents': len(cache_index),
-        'cache_index': cache_index
+
+        'cache_index': cache_index,
+
     })
+

@@ -9,6 +9,8 @@ services:
       - "5000:5000"
     volumes:
       - uniportal_storage:/data/uniportal:ro
+      # 开发时可改为绑定本地目录，与 Windows 解析结果同步：
+      # - ./local_workspaces:/app/local_workspaces
       - reqcheck_local:/app/local_workspaces
     environment:
       - UNIPORTAL_STORAGE_PATH=/data/uniportal

@@ -2,7 +2,7 @@ import os
 import shutil
 from typing import Optional
 
-from app.parsers.image_convert import ensure_browser_image
+from app.parsers.image_convert import ensure_browser_image, sniff_image_format
 from app.parsers.models import ImageData
 
 
@@ -17,7 +17,11 @@ class AssetStore:
         self._counter += 1
         data, ext = ensure_browser_image(data, ext)
         ext = ext if ext.startswith('.') else f'.{ext}'
-        if ext.lower() not in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'):
+        if sniff_image_format(data) not in ('png', 'jpeg', 'gif'):
+            # 转换失败时保留原始扩展名，避免 EMF 冒充 PNG
+            if sniff_image_format(data) in ('emf', 'wmf'):
+                ext = '.emf'
+        if ext.lower() not in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.emf'):
             ext = '.png'
         asset_id = f'img_{self._counter:03d}'
         filename = f'{asset_id}{ext}'

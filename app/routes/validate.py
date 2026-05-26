@@ -1,6 +1,9 @@
+from typing import List
+
 from flask import Blueprint, request, jsonify
 from app import app
 from app.models import db, ValidationResult, LLMConfig
+from app.services.workspace import parse_results_folder, validate_results_folder
 import os
 import requests
 import json
@@ -8,22 +11,26 @@ import hashlib
 
 validate_bp = Blueprint('validate', __name__)
 
-VALIDATE_OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'validate_results')
-CACHE_INDEX_FILE = os.path.join(VALIDATE_OUTPUT_FOLDER, 'cache_index.json')
 
-if not os.path.exists(VALIDATE_OUTPUT_FOLDER):
-    os.makedirs(VALIDATE_OUTPUT_FOLDER)
+def _validate_output_folder():
+    return validate_results_folder(app)
+
+
+def _cache_index_file():
+    return os.path.join(_validate_output_folder(), 'cache_index.json')
 
 def load_cache_index():
     """加载验证缓存索引"""
-    if os.path.exists(CACHE_INDEX_FILE):
-        with open(CACHE_INDEX_FILE, 'r', encoding='utf-8') as f:
+    cache_path = _cache_index_file()
+    if os.path.exists(cache_path):
+        with open(cache_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     return {}
 
+
 def save_cache_index(cache_index):
     """保存验证缓存索引"""
-    with open(CACHE_INDEX_FILE, 'w', encoding='utf-8') as f:
+    with open(_cache_index_file(), 'w', encoding='utf-8') as f:
         json.dump(cache_index, f, ensure_ascii=False, indent=2)
 
 def compute_content_hash(req_tree):
@@ -37,10 +44,12 @@ def compute_content_hash(req_tree):
 def validate_requirements(doc_id):
     if not doc_id:
         return jsonify({'error': 'doc_id is required'}), 400
-    
+
+    force = request.args.get('force', '').lower() in ('1', 'true', 'yes')
+
     # 1. 检查是否已有验证结果文件
-    validation_file = os.path.join(VALIDATE_OUTPUT_FOLDER, f"validation_{doc_id}.json")
-    if os.path.exists(validation_file):
+    validation_file = os.path.join(_validate_output_folder(), f"validation_{doc_id}.json")
+    if not force and os.path.exists(validation_file):
         with open(validation_file, 'r', encoding='utf-8') as f:
             validation_results = json.load(f)
         return jsonify({
@@ -49,8 +58,7 @@ def validate_requirements(doc_id):
         })
     
     # 2. 从parse结果读取需求树
-    base_dir = os.path.dirname(os.path.dirname(__file__))
-    json_file = os.path.join(base_dir, 'parse_results', f"{doc_id}.json")
+    json_file = os.path.join(parse_results_folder(app), f"{doc_id}.json")
     
     if os.path.exists(json_file):
         with open(json_file, 'r', encoding='utf-8') as f:
@@ -66,10 +74,10 @@ def validate_requirements(doc_id):
     # 3. 检查验证缓存
     content_hash = compute_content_hash(req_tree)
     cache_index = load_cache_index()
-    
-    if content_hash in cache_index:
+
+    if not force and content_hash in cache_index:
         cached_doc_id = cache_index[content_hash]
-        cached_validation_file = os.path.join(VALIDATE_OUTPUT_FOLDER, f"validation_{cached_doc_id}.json")
+        cached_validation_file = os.path.join(_validate_output_folder(), f"validation_{cached_doc_id}.json")
         if os.path.exists(cached_validation_file):
             print(f"发现相同需求树，已缓存验证结果 doc_id: {cached_doc_id}")
             
@@ -142,40 +150,102 @@ def load_rules(appendix):
     return {}
 
 def build_rule_tree_from_file(file_path):
-    """从文件构建规则树"""
+    """从附录 J 文本构建规则树，模板行（3.2.X）不覆盖父章节。"""
+    import re
+
+    rules = dict(get_default_appendix_j_rules())
+
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        rules = {}
-        lines = content.strip().split('\n')
-        
-        current_section = ''
-        current_content = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            import re
-            section_match = re.match(r'^(\d+(\.\d+)*)\s*(.+)$', line)
-            if section_match:
-                if current_section:
-                    rules[current_section] = ' '.join(current_content)
-                
-                current_section = section_match.group(1)
-                current_content = [section_match.group(3)]
-            else:
-                current_content.append(line)
-        
-        if current_section:
-            rules[current_section] = ' '.join(current_content)
-        
-        return rules
+            lines = f.read().strip().split('\n')
     except Exception as e:
         print(f"加载附录文件失败: {str(e)}")
-        return get_default_appendix_j_rules()
+        return rules
+
+    current_section = ''
+    current_content: list[str] = []
+
+    def flush():
+        nonlocal current_section, current_content
+        if not current_section:
+            return
+        text = ' '.join(current_content).strip()
+        if text and (current_section not in rules or len(text) > len(rules.get(current_section, ''))):
+            rules[current_section] = text
+        current_section = ''
+        current_content = []
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith('附录') or line.startswith('（规范性附录') or line.startswith('《'):
+            continue
+
+        m = re.match(r'^(\d+(?:\.\d+)*)(.*)$', line)
+        if m:
+            num = m.group(1)
+            rest = m.group(2).strip()
+
+            # 模板占位：3.2.X / 3.3.X — 作为独立规则键，不覆盖 3.2 / 3.3
+            if re.match(r'^\.X', rest):
+                flush()
+                template_key = f'{num}.X'
+                current_section = template_key
+                title = rest[2:].strip('（） ') if rest.startswith('.X') else rest
+                current_content = [title] if title else []
+                continue
+
+            flush()
+            current_section = num
+            current_content = [rest] if rest else []
+        elif current_section:
+            current_content.append(line)
+
+    flush()
+    return rules
+
+
+def extract_section_number(node: dict):
+    """从节点的 number / 标题 提取章节号，不从正文 content 提取。"""
+    import re
+
+    if node.get('number'):
+        return str(node['number']).strip()
+
+    for field in ('display_title', 'label', 'name'):
+        text = (node.get(field) or '').strip()
+        if not text:
+            continue
+        m = re.match(r'^(\d+(?:\.\d+)*)', text)
+        if m:
+            return m.group(1)
+    return None
+
+
+def resolve_rule_for_node(node: dict, rules: dict) -> str:
+    """按章节号匹配附录规则，支持父章节与 3.x.X 模板回退。"""
+    title_number = extract_section_number(node)
+
+    if title_number:
+        if title_number in rules:
+            return rules[title_number]
+
+        parts = title_number.split('.')
+        for j in range(len(parts) - 1, 0, -1):
+            parent = '.'.join(parts[:j])
+            if parent in rules:
+                return rules[parent]
+
+        if len(parts) >= 2:
+            template_key = f'{parts[0]}.{parts[1]}.X'
+            if template_key in rules:
+                return rules[template_key]
+
+        if parts[0] in rules:
+            return rules[parts[0]]
+
+    return '无对应规则'
 
 def get_default_appendix_j_rules():
     """获取默认的附录J规则"""
@@ -210,6 +280,59 @@ def get_default_appendix_j_rules():
     }
 
 BATCH_SIZE = 10
+
+VALIDATION_GUIDELINES = """
+## 审查原则（必须遵守）
+1. 附录 J 中「可引用」「若有」「适用时」表示该要求为可选，不得将可选项当作强制项。
+2. 表格、图注、接口图及其结构化字段（标识、类型、输入、输出等）均视为有效需求内容，与叙述性正文同等对待。
+3. 不得仅因缺少独立叙述段落、未出现「IRS」「接口需求规格说明」等字样而判定不合规；若表格/图已完整描述接口或需求，应视为符合规范。
+4. 仅当节点既无实质正文、也无表格/图片等结构化内容时，才可因「内容缺失」判定不合规。
+5. 对 3.3 外部接口、3.4 内部接口等章节：规范允许通过接口图+表格描述接口，引用 IRS 为可选方式之一，非唯一合规路径。
+"""
+
+
+def format_table_for_validation(table: dict, index: int) -> str:
+    headers = table.get('headers') or []
+    rows = table.get('rows') or []
+    if not headers and not rows:
+        return ''
+    lines = [f'【表格{index}】']
+    if headers:
+        lines.append('表头: ' + ' | '.join(str(h) for h in headers))
+    for row in rows:
+        lines.append('行: ' + ' | '.join(str(c) for c in row))
+    return '\n'.join(lines)
+
+
+def format_node_validation_content(node: dict) -> str:
+    """合并正文、表格、图片说明，供大模型审查。"""
+    parts: List[str] = []
+    text = (node.get('content') or '').strip()
+    if text:
+        parts.append('【正文】\n' + text)
+
+    tables = node.get('tables') or []
+    if tables:
+        tbl_parts = []
+        for i, tbl in enumerate(tables, 1):
+            block = format_table_for_validation(tbl, i)
+            if block:
+                tbl_parts.append(block)
+        if tbl_parts:
+            parts.append('【表格内容】\n' + '\n\n'.join(tbl_parts))
+
+    images = node.get('images') or []
+    if images:
+        img_lines = []
+        for i, img in enumerate(images, 1):
+            cap = img.get('caption') or img.get('alt') or f'图片{i}'
+            img_lines.append(f'- {cap}')
+        parts.append('【图片/接口图】\n' + '\n'.join(img_lines))
+
+    if not parts:
+        label = node.get('display_title') or node.get('label') or ''
+        return label or '（无正文、表格或图片）'
+    return '\n\n'.join(parts)
 
 def validate_batch(req_tree, rules):
     """批处理验证需求树"""
@@ -288,73 +411,51 @@ def validate_batch(req_tree, rules):
     return [root_result] + all_results
 
 def collect_nodes(node, nodes, parent_id=None):
-    """收集需求树中的所有节点"""
+    """收集需求树中的所有节点（含表格、图片等结构化内容）。"""
     nodes.append({
         'id': node['id'],
-        'name': node.get('label', node.get('name', '')),
-        'original_text': node.get('content', node.get('original_text', node.get('label', ''))),
-        'parent_id': parent_id
+        'name': node.get('display_title') or node.get('label', node.get('name', '')),
+        'number': node.get('number'),
+        'label': node.get('label'),
+        'display_title': node.get('display_title'),
+        'original_text': format_node_validation_content(node),
+        'parent_id': parent_id,
     })
-    
+
     children = node.get('children')
     if children is None:
         children = []
-    
+
     for child in children:
         collect_nodes(child, nodes, node['id'])
 
 def construct_validation_prompt(nodes, rules):
     """构造验证提示词，按照标题号逐条验证"""
-    prompt = """你是一个文档审查专家，如下是一组文档规范及对应的文档内容。请你根据规范，判断文档内容是否符合规范，返回一个JSON，JSON格式应当如下，用result（bool）标明是否合规，用reason（String）简要说明判断的依据：
-{
-  "result": false,
-  "reason": "这个需求没有说明需求的具体数值"
-}
+    prompt = """你是一个文档审查专家，熟悉 GJB 438C 附录 J（软件需求规格说明）编写要求。
+请根据规范判断文档内容是否合规。注意：规范中的「可引用」「若有」为可选要求，表格与接口图属于有效内容。
 
-# 文档规范
-{{RULE}}
+""" + VALIDATION_GUIDELINES + """
 
-# 文档内容
-{{CONTENT}}
-
-请对以下每个节点逐一进行判断，并返回一个JSON数组，每个元素包含：
+返回 JSON 数组，每个元素包含：
 - id: 节点ID
 - name: 节点名称
-- result: bool值，true表示合规，false表示不合规
+- result: bool，true=合规，false=不合规
 - reason: 简要说明判断依据
 - parent_id: 父节点ID
 
 """
     
     for i, node in enumerate(nodes):
-        title_number = None
-        import re
-        original_text = node.get('original_text') or ''
-        match = re.match(r'^(\d+(\.\d+)*)', original_text)
-        if match:
-            title_number = match.group(1)
-        
-        rule = '无对应规则'
-        if title_number:
-            if title_number in rules:
-                rule = rules[title_number]
-            else:
-                parts = title_number.split('.')
-                for j in range(len(parts)-1, 0, -1):
-                    parent_title = '.'.join(parts[:j])
-                    if parent_title in rules:
-                        rule = rules[parent_title]
-                        break
-        
-        if rule == '无对应规则':
-            rule = rules.get(node['name'], '无对应规则')
-        
+        title_number = extract_section_number(node)
+        rule = resolve_rule_for_node(node, rules)
+
         prompt += f"\n## 节点 {i+1}\n"
         prompt += f"ID: {node['id']}\n"
         prompt += f"名称: {node['name']}\n"
         prompt += f"标题号: {title_number or '无'}\n"
         prompt += f"# 文档规范\n{rule}\n"
-        prompt += f"# 文档内容\n{original_text}\n"
+        content_text = node.get('original_text') or node.get('name') or ''
+        prompt += f"# 文档内容（含正文、表格、图片说明）\n{content_text}\n"
     
     prompt += "\n请严格按照以下格式返回验证结果，不要包含其他无关内容：\n"
     prompt += "[\n"
@@ -376,7 +477,12 @@ def call_deepseek_api(prompt, model, api_key, api_url):
         'messages': [
             {
                 'role': 'system',
-                'content': '你是一个专业的需求文档审查专家，精通软件工程和需求分析。'
+                'content': (
+                    '你是专业的软件需求规格说明（SRS）审查专家，精通 GJB 438C 附录 J。'
+                    '审查时：表格、接口图、结构化字段与叙述正文同等有效；'
+                    '「可引用 IRS」等为可选表述，不得仅因未写 IRS 或缺少叙述段而判不合规；'
+                    '仅当既无正文也无表格/图等实质内容时才可判缺失。'
+                )
             },
             {
                 'role': 'user',

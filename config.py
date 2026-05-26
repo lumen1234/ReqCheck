@@ -2,20 +2,33 @@ import os
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-APPENDICES_FOLDER = os.path.join(BASE_DIR, 'appendices')
-ALLOWED_EXTENSIONS = {'txt', 'docx'}
+# UniPortal 集成：私有工作区（上传 + 所有生成物）
+LOCAL_WORKSPACES_DIR = os.environ.get(
+    "LOCAL_WORKSPACES_DIR",
+    os.path.join(BASE_DIR, "local_workspaces"),
+)
+# UniPortal 共享卷（只读，docker 挂载 /data/uniportal）
+UNIPORTAL_STORAGE_PATH = os.environ.get("UNIPORTAL_STORAGE_PATH") or None
 
-SECRET_KEY = 'your-secret-key-here'
+UPLOAD_FOLDER = os.path.join(LOCAL_WORKSPACES_DIR, "uploads")
+PARSE_RESULTS_FOLDER = os.path.join(LOCAL_WORKSPACES_DIR, "parse_results")
+PARSE_ASSETS_FOLDER = os.path.join(LOCAL_WORKSPACES_DIR, "parse_assets")
+VALIDATE_RESULTS_FOLDER = os.path.join(LOCAL_WORKSPACES_DIR, "validate_results")
+EXPORT_RESULTS_FOLDER = os.path.join(LOCAL_WORKSPACES_DIR, "export_results")
+
+APPENDICES_FOLDER = os.path.join(BASE_DIR, "appendices")
+ALLOWED_EXTENSIONS = {"txt", "docx", "md", "markdown"}
+
+SECRET_KEY = "your-secret-key-here"
 DEBUG = True
 
 # 数据库配置
-SQLALCHEMY_DATABASE_URI = 'sqlite:///req_validator.db'  # SQLite
-SQLALCHEMY_TRACK_MODIFICATIONS = False  # 禁用修改跟踪，提高性能
+SQLALCHEMY_DATABASE_URI = "sqlite:///req_validator.db"
+SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 # 大模型API配置
 API_KEY_DEFAULT = "sk-ba7862f60e3e460e88e17dad82e34982"
 API_URL_DEFAULT = "https://api.deepseek.com"
 API_MODEL_DEFAULT = "deepseek-chat"
 
-API_TIMEOUT = 270  # 超时时间（秒）
+API_TIMEOUT = 270
