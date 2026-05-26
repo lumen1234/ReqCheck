@@ -45,8 +45,8 @@ logs/
 .env.*.local
 
 # Build files
-build/
-dist/
+/build/
+/dist/
 *.egg-info/
 
 # Test files
