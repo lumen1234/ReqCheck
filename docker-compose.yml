@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  reqcheck:
+    build: .
+    image: reqcheck
+    container_name: reqcheck
+    ports:
+      - "5000:5000"
+    volumes:
+      - uniportal_storage:/data/uniportal:ro
+      - reqcheck_local:/app/local_workspaces
+    environment:
+      - UNIPORTAL_STORAGE_PATH=/data/uniportal
+      - LOCAL_WORKSPACES_DIR=/app/local_workspaces
+    restart: unless-stopped
+
+volumes:
+  uniportal_storage:
+    external: true
+  reqcheck_local:
+    driver: local
