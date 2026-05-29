@@ -18,7 +18,10 @@ RUN set -eux; \
       sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
       sed -i 's|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list; \
     fi; \
-    apt-get update && apt-get install -y --no-install-recommends libreoffice-writer-nogui \
+    apt-get update && apt-get install -y --no-install-recommends \
+        libreoffice-writer-nogui \
+        libreoffice-draw-nogui \
+        imagemagick \
     && rm -rf /var/lib/apt/lists/* \
     && pip install -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r requirements.txt
 COPY . .

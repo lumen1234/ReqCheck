@@ -1,0 +1,74 @@
+# Docker 镜像导出物（避免 tar 套 tar 导致体积暴涨）
+reqcheck.tar
+*.tar
+*.tar.gz
+.tmp-reqcheck.tar*
+
+# Git / 编辑器 / 系统垃圾
+.git
+.gitignore
+.github
+.vscode
+.idea
+.cursor
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Python 虚拟环境与缓存
+venv/
+env/
+ENV/
+req/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+coverage.xml
+.test
+
+# 前端：阶段 1 会 npm ci + build，无需带入宿主机产物
+frontend/node_modules/
+frontend/dist/
+frontend/.npm
+frontend/.eslintcache
+frontend/.stylelintcache
+
+# 运行期数据（应通过卷挂载，不应 bake 进镜像）
+local_workspaces/
+instance/
+*.db
+uploads/*
+!uploads/.gitkeep
+parse_results/
+validate_results/
+export_results/
+parse_assets/
+integration_test_results/
+
+# 密钥与本地配置
+.env
+.env.*
+!.env.example
+
+# 文档与开发脚本（运行时不需要）
+docs/
+scripts/
+frontend/README.md
+frontend/工程规范文档.md
+README.md
+prompt.md
+proxy
+
+# 其他锁文件 / 临时目录
+Pipfile.lock
+poetry.lock
+tmp/
+temp/
+build/
+logs/
+*.log

@@ -58,10 +58,45 @@
           </div>
 
           <!-- Node Content -->
-          <div v-if="selectedNode.content" class="space-y-3">
+          <div v-if="hasNodeContent(selectedNode)" class="space-y-3">
             <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wide">需求内容</h3>
-            <div class="bg-slate-50 border border-slate-200 rounded-lg p-6">
-              <p class="text-slate-700 leading-relaxed whitespace-pre-wrap">{{ selectedNode.content }}</p>
+            <div class="bg-slate-50 border border-slate-200 rounded-lg p-6 space-y-4">
+              <div v-if="selectedNode.images && selectedNode.images.length" class="space-y-4">
+                <figure
+                  v-for="img in selectedNode.images"
+                  :key="img.id"
+                  class="text-center"
+                >
+                  <img
+                    :key="`${selectedNode.id}-${img.id}`"
+                    :src="`${img.path}?doc=${documentId}`"
+                    :alt="img.caption || img.alt || '图片'"
+                    class="max-w-full mx-auto border border-slate-200 rounded-lg bg-white min-h-[80px]"
+                    loading="eager"
+                    decoding="async"
+                  />
+                  <figcaption v-if="img.caption || img.alt" class="text-xs text-slate-500 mt-2">
+                    {{ img.caption || img.alt }}
+                  </figcaption>
+                </figure>
+              </div>
+              <div
+                v-if="selectedNode.content_html"
+                class="report-content prose prose-sm max-w-none text-slate-700"
+                v-html="selectedNode.content_html"
+              />
+              <div v-else-if="selectedNode.tables && selectedNode.tables.length" class="space-y-4">
+                <div
+                  v-for="tbl in selectedNode.tables"
+                  :key="tbl.id || tbl.caption"
+                  class="overflow-x-auto"
+                  v-html="tableToHtml(tbl)"
+                />
+              </div>
+              <p
+                v-else-if="selectedNode.content"
+                class="text-slate-700 leading-relaxed whitespace-pre-wrap"
+              >{{ selectedNode.content }}</p>
             </div>
           </div>
 
@@ -170,6 +205,9 @@ const convertFlatToTree = (flatList) => {
       id: item.node_id || item.id,
       label: item.title || item.label,
       content: item.content || '',
+      content_html: item.content_html || '',
+      tables: item.tables || [],
+      images: item.images || [],
       level: item.level || 0,
       validation_result: item.validation_result,
       validation_reason: item.validation_reason || '',
@@ -252,6 +290,51 @@ const failedNodes = computed(() => {
     : 0
 })
 
+const hasNodeContent = (node) => {
+  if (!node) return false
+  return Boolean(
+    node.content ||
+    node.content_html ||
+    (node.images && node.images.length) ||
+    (node.tables && node.tables.length)
+  )
+}
+
+const escapeHtml = (text) => {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+const tableToHtml = (table) => {
+  const headers = table?.headers || []
+  const rows = table?.rows || []
+  if (!headers.length && !rows.length) return ''
+  let html = '<table class="req-table" border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">'
+  if (headers.length) {
+    html += '<thead><tr>'
+    headers.forEach((h) => {
+      html += `<th style="border:1px solid #ccc;padding:6px;background:#f5f5f5">${escapeHtml(h)}</th>`
+    })
+    html += '</tr></thead>'
+  }
+  if (rows.length) {
+    html += '<tbody>'
+    rows.forEach((row) => {
+      html += '<tr>'
+      row.forEach((cell) => {
+        html += `<td style="border:1px solid #ccc;padding:6px">${escapeHtml(cell)}</td>`
+      })
+      html += '</tr>'
+    })
+    html += '</tbody>'
+  }
+  html += '</table>'
+  return html
+}
+
 // 处理节点点击事件
 const handleNodeClick = (data, node, component) => {
   selectedNode.value = data
@@ -328,4 +411,19 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.report-content :deep(.req-table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  display: table;
+}
+.report-content :deep(.req-table th),
+.report-content :deep(.req-table td) {
+  border: 1px solid #ccc;
+  padding: 6px;
+  vertical-align: top;
+}
+.report-content :deep(.req-table th) {
+  background: #f5f5f5;
+}
 </style>
