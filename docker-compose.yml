@@ -8,10 +8,12 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - uniportal_storage:/data/uniportal:ro
-      # 开发时可改为绑定本地目录，与 Windows 解析结果同步：
-      # - ./local_workspaces:/app/local_workspaces
+      # 与 UniPortal 共用 external 卷 uniportal_storage（须先启动 UniPortal 创建该卷）
+      # ReqCheck 需读写：导出 JSON 写入 {item_id}/_reqcheck/（其他子工具通常 :ro）
+      - uniportal_storage:/data/uniportal
       - reqcheck_local:/app/local_workspaces
+      # 本地开发可改为绑定目录（与 Windows 代码目录同步）：
+      # - ./local_workspaces:/app/local_workspaces
     environment:
       - UNIPORTAL_STORAGE_PATH=/data/uniportal
       - LOCAL_WORKSPACES_DIR=/app/local_workspaces
@@ -20,5 +22,6 @@ services:
 volumes:
   uniportal_storage:
     external: true
+    name: uniportal_storage
   reqcheck_local:
-    driver: local
+    name: reqcheck_local

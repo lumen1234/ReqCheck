@@ -22,6 +22,10 @@ RUN set -eux; \
         libreoffice-writer-nogui \
         libreoffice-draw-nogui \
         imagemagick \
+        fontconfig \
+        fonts-noto-cjk \
+        fonts-wqy-zenhei \
+    && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/* \
     && pip install -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple -r requirements.txt
 COPY . .

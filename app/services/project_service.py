@@ -1,10 +1,11 @@
-"""UniPortal 双数据源：共享卷只读 + 私有卷读写。"""
+"""UniPortal 双数据源：共享卷读写（导出 JSON）+ 私有卷读写。"""
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from flask import current_app
 
@@ -59,8 +60,72 @@ def is_uniportal_item(project_id: str) -> bool:
     return resolve_project_dir(project_id) is not None
 
 
+def resolve_portal_project_id_for_item(
+    item_id: str,
+    portal_project_id: Optional[str] = None,
+) -> Optional[str]:
+    """解析 item_id 所属的 UniPortal 工程 UUID。"""
+    storage = uniportal_storage_path()
+    if not storage:
+        return None
+
+    if portal_project_id:
+        candidate = os.path.join(storage, portal_project_id, item_id)
+        if os.path.isdir(candidate):
+            return portal_project_id
+        return None
+
+    for portal_proj in os.listdir(storage):
+        portal_path = os.path.join(storage, portal_proj)
+        if not os.path.isdir(portal_path):
+            continue
+        if os.path.isdir(os.path.join(portal_path, item_id)):
+            return portal_proj
+    return None
+
+
+def get_uniportal_export_dir(
+    item_id: str,
+    portal_project_id: Optional[str] = None,
+) -> Optional[str]:
+    """返回共享卷中该 item 的导出目录（不存在则调用方负责 makedirs）。"""
+    resolved_portal_id = resolve_portal_project_id_for_item(item_id, portal_project_id)
+    storage = uniportal_storage_path()
+    if not resolved_portal_id or not storage:
+        return None
+    subdir = current_app.config.get("UNIPORTAL_EXPORT_SUBDIR", "_reqcheck")
+    return os.path.join(storage, resolved_portal_id, item_id, subdir)
+
+
+def sync_export_to_uniportal(
+    item_id: str,
+    requirements: list[dict[str, Any]],
+    portal_project_id: Optional[str] = None,
+) -> Optional[str]:
+    """将导出 JSON 同步写入共享卷；非 UniPortal item 或卷不可写时返回 None。"""
+    export_dir = get_uniportal_export_dir(item_id, portal_project_id)
+    if not export_dir:
+        return None
+
+    try:
+        os.makedirs(export_dir, exist_ok=True)
+        export_path = os.path.join(export_dir, f"export_{item_id}.json")
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump(requirements, f, ensure_ascii=False, indent=2)
+        return export_path
+    except OSError as exc:
+        current_app.logger.warning("共享卷导出失败: %s", exc)
+        return None
+
+
 def resolve_project_dir(project_id: str, portal_project_id: Optional[str] = None) -> Optional[str]:
-    """返回 project_id 对应目录（UniPortal item 目录）。"""
+    """返回 project_id 对应目录（UniPortal item 目录）。
+
+    读路径解析顺序（与 SUBTOOL_INTEGRATION_GUIDE §4.2 一致）：
+    1. 私有卷 local_workspaces/{project_id}（若存在）
+    2. 共享卷 /data/uniportal/{portal_project_id}/{project_id}（若指定工程 ID）
+    3. 共享卷全工程扫描（未指定 portal_project_id 时，用于 item_id 全局定位）
+    """
     local_item = os.path.join(local_workspaces_dir(), project_id)
     if os.path.isdir(local_item):
         return local_item
@@ -204,7 +269,12 @@ def _scan_uniportal_items(portal_project_id: str) -> list[ProjectEntry]:
 
 
 def list_projects(portal_project_id: Optional[str] = None) -> list[ProjectEntry]:
-    """合并 UniPortal（按工程隔离）+ 本地上传列表。"""
+    """合并 UniPortal（按工程隔离）+ 本地上传列表。
+
+    工程隔离（SUBTOOL_INTEGRATION_GUIDE §4.3）：
+    - 传入 portal_project_id：扫描共享卷该工程下 item + 全部本地上传
+    - 未传 portal_project_id：仅本地上传（不暴露 UniPortal 项目，防跨工程泄露）
+    """
     from app.models import Document
 
     items: list[ProjectEntry] = []

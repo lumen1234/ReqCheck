@@ -12,6 +12,12 @@ from app.parsers.image_convert import load_browser_image_file, sniff_image_forma
 
 from app.services import project_service
 
+from app.services.req_classifier import (
+    classify_requirement_tree,
+    ensure_tree_classified,
+    tree_needs_classification,
+)
+
 from app.services.workspace import parse_assets_folder, parse_results_folder
 
 import os
@@ -76,15 +82,19 @@ def save_cache_index(cache_index):
 
 
 
-def _prepare_tree_for_response(req_tree, doc_id: str):
+def _prepare_tree_for_response(req_tree, doc_id: str, classify: bool = True):
 
-    """补全 content_html / display_title，兼容旧缓存 JSON。"""
+    """补全 content_html / display_title / is_req，兼容旧缓存 JSON。"""
 
     if not req_tree:
 
         return req_tree
 
     enrich_tree_display(req_tree, doc_id)
+
+    if classify and tree_needs_classification(req_tree):
+
+        ensure_tree_classified(req_tree)
 
     return req_tree
 
@@ -196,7 +206,13 @@ def parse_document(doc_id):
 
             req_tree = json.load(f)
 
+        needs_save = tree_needs_classification(req_tree)
+
         req_tree = _prepare_tree_for_response(req_tree, doc_id)
+
+        if needs_save:
+
+            save_json_to_file(doc_id, req_tree)
 
         return jsonify({
 
@@ -283,6 +299,8 @@ def parse_document(doc_id):
             assets_base_folder=_assets_folder(),
 
         )
+
+        classify_requirement_tree(req_tree)
 
     except ValueError as e:
 

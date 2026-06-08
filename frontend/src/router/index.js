@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
+import { refreshPortalProjectId } from '../utils/portal'
 import UploadView from '../views/UploadView.vue'
 import ParseView from '../views/ParseView.vue'
 import ValidateView from '../views/ValidateView.vue'
@@ -56,8 +57,9 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes,
 })    
-// 全局路由守卫 - 设置页面标题
-router.beforeEach((to, from, next) => {  
+// 全局路由守卫 - 设置页面标题 + 刷新 UniPortal 工程 ID
+router.beforeEach((to, from, next) => {
+  refreshPortalProjectId()
   document.title = to.meta.title ? `${to.meta.title} - 文档审查系统` : '文档审查系统'
   next()
 })

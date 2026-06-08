@@ -10,23 +10,19 @@ const apiClient = axios.create({
   }
 })
 
-// 请求拦截器
+// 请求拦截器：UniPortal 工程隔离 — 所有 GET 自动附带 portal_project_id
 apiClient.interceptors.request.use(
   config => {
-    // 可以在这里添加 token
-    // const token = localStorage.getItem('token')
-    // if (token) {
-    //   config.headers.Authorization = `Bearer ${token}`
-    // }
+    const portalProjectId = getPortalProjectId()
+    if (portalProjectId && (config.method || 'get').toLowerCase() === 'get') {
+      config.params = { ...(config.params || {}), portal_project_id: portalProjectId }
+    }
     return config
   },
-  error => {
-    console.error('Request Error:', error)
-    return Promise.reject(error)
-  }
+  error => Promise.reject(error)
 )
 
-// 响应拦截器
+// 响应拦截器（保留原错误处理）
 apiClient.interceptors.response.use(
   response => response.data,
   error => {
@@ -102,8 +98,9 @@ export const getReviewResult = (docId, params = {}) => {
  * @param {string} docId - 文档ID
  * @returns {Promise} 返回扁平化的需求列表 { requirements: [...], total_requirements: number }
  */
-export const exportRequirements = (docId) => {
-  return apiClient.get(`/export/${docId}`)
+export const exportRequirements = (docId, portalProjectId = getPortalProjectId()) => {
+  const params = portalProjectId ? { portal_project_id: portalProjectId } : {}
+  return apiClient.get(`/export/${docId}`, { params })
 }
 
 /**

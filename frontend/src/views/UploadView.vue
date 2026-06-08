@@ -76,7 +76,7 @@
         <div class="flex items-center justify-between border-b border-slate-100 pb-2">
           <h2 class="text-xl font-bold flex items-center gap-2 text-slate-800">
             <History class="w-5 h-5 text-primary-600" />
-            {{ portalProjectId ? '项目列表（UniPortal + 本地上传）' : '历史文档（本地上传）' }}
+            {{ uniPortalMode ? '项目列表（UniPortal + 本地上传）' : '历史文档（本地上传）' }}
           </h2>
           <button @click="fetchDocuments" class="text-sm font-semibold text-primary-600 hover:text-primary-700">
             刷新列表
@@ -135,14 +135,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { uploadDocument, getDocuments, deleteDocument } from '../api'
-import { getPortalProjectId, withPortalQuery } from '../utils/portal'
+import { getPortalProjectId, withPortalQuery, isUniPortalMode } from '../utils/portal'
 import { Upload, FileText, X, RotateCw, History, ChevronRight, Trash2 } from 'lucide-vue-next'
 
 const router = useRouter()
-const portalProjectId = getPortalProjectId()
+const portalProjectId = computed(() => getPortalProjectId())
+const uniPortalMode = computed(() => isUniPortalMode())
 
 const fileInput = ref(null)
 const selectedFile = ref(null)
@@ -232,7 +233,7 @@ const uploadFile = async () => {
 const fetchDocuments = async () => {
   loading.value = true
   try {
-    const response = await getDocuments(portalProjectId)
+    const response = await getDocuments(portalProjectId.value)
     documents.value = response.documents || []
   } catch (error) {
     console.error('Failed to fetch documents:', error)

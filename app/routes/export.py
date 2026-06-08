@@ -1,6 +1,8 @@
 from flask import Blueprint, request, jsonify, send_file
 from app import app
 from app.models import RequirementTree, ValidationResult
+from app.services import project_service
+from app.services.req_classifier import ensure_tree_classified, tree_needs_classification
 from app.services.workspace import (
     export_results_folder,
     parse_results_folder,
@@ -33,6 +35,12 @@ def export_requirements(doc_id):
         if not requirement_tree:
             return jsonify({'error': 'Requirement tree not found'}), 404
         req_tree = requirement_tree.tree_json
+
+    if tree_needs_classification(req_tree):
+        ensure_tree_classified(req_tree)
+        parse_json_file = os.path.join(parse_results_folder(app), f'{doc_id}.json')
+        with open(parse_json_file, 'w', encoding='utf-8') as f:
+            json.dump(req_tree, f, ensure_ascii=False, indent=2)
     
     validation_results = None
     validation_file = os.path.join(validate_results_folder(app), f'validation_{doc_id}.json')
@@ -68,6 +76,8 @@ def export_requirements(doc_id):
             'images': node.get('images') or [],
             'level': node.get('level', 0),
             'parent_id': parent_id,
+            'is_req': node.get('is_req', 0),
+            'is_req_reason': node.get('is_req_reason', ''),
             'validation_result': validation.get('result') if validation else None,
             'validation_reason': validation.get('reason', '') if validation else ''
         }
@@ -84,10 +94,19 @@ def export_requirements(doc_id):
     
     with open(export_path, 'w', encoding='utf-8') as f:
         json.dump(requirements, f, ensure_ascii=False, indent=2)
+
+    portal_project_id = request.args.get('portal_project_id') or None
+    uniportal_export_path = project_service.sync_export_to_uniportal(
+        doc_id,
+        requirements,
+        portal_project_id=portal_project_id,
+    )
     
     return jsonify({
         'export_file': export_filename,
         'export_path': export_path,
+        'uniportal_export_path': uniportal_export_path,
+        'uniportal_export_synced': uniportal_export_path is not None,
         'total_requirements': len(requirements),
         'requirements': requirements
     })
