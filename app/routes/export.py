@@ -77,10 +77,11 @@ def export_requirements(doc_id):
             'level': node.get('level', 0),
             'parent_id': parent_id,
             'is_req': node.get('is_req', 0),
-            'is_req_reason': node.get('is_req_reason', ''),
             'validation_result': validation.get('result') if validation else None,
             'validation_reason': validation.get('reason', '') if validation else ''
         }
+        if node.get('is_req') == 1:
+            requirement['type'] = node.get('type', '')
         requirements.append(requirement)
         
         children = node.get('children') or []

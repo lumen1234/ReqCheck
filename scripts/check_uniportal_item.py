@@ -49,6 +49,10 @@ def _export_subdir() -> str:
     return os.environ.get("UNIPORTAL_EXPORT_SUBDIR", config.UNIPORTAL_EXPORT_SUBDIR)
 
 
+def _export_filename() -> str:
+    return os.environ.get("UNIPORTAL_EXPORT_FILENAME", config.UNIPORTAL_EXPORT_FILENAME)
+
+
 def _local_dir() -> str:
     return os.environ.get("LOCAL_WORKSPACES_DIR", config.LOCAL_WORKSPACES_DIR)
 
@@ -79,11 +83,26 @@ def find_docs(item_dir: Path) -> list[str]:
     return sorted(found)[:5]
 
 
+def _shared_export_files(export_dir: Path, export_filename: str) -> list[str]:
+    if not export_dir.is_dir():
+        return []
+    files: list[str] = []
+    primary = export_dir / export_filename
+    if primary.is_file():
+        files.append(export_filename)
+    files.extend(
+        name for name in sorted(f.name for f in export_dir.glob("export_*.json"))
+        if name not in files
+    )
+    return files
+
+
 def inspect_item(
     storage: Optional[str],
     item_id: str,
     portal_project_id: Optional[str] = None,
     export_subdir: str = "_reqcheck",
+    export_filename: str = "requirement.json",
 ) -> dict:
     local_upload = Path(_local_dir()) / "uploads"
     local_export = Path(_local_dir()) / "export_results" / f"export_{item_id}.json"
@@ -129,7 +148,7 @@ def inspect_item(
 
     item_dir = storage_path / resolved_portal / item_id
     export_dir = item_dir / export_subdir
-    export_files = sorted(f.name for f in export_dir.glob("export_*.json")) if export_dir.is_dir() else []
+    export_files = _shared_export_files(export_dir, export_filename)
 
     result.update(
         {
@@ -155,7 +174,7 @@ def inspect_item(
     return result
 
 
-def list_shared_items(storage: str, export_subdir: str) -> list[dict]:
+def list_shared_items(storage: str, export_subdir: str, export_filename: str) -> list[dict]:
     root = Path(storage)
     if not root.is_dir():
         return []
@@ -168,7 +187,7 @@ def list_shared_items(storage: str, export_subdir: str) -> list[dict]:
             if not item_dir.is_dir() or item_dir.name.startswith("."):
                 continue
             export_dir = item_dir / export_subdir
-            exports = sorted(f.name for f in export_dir.glob("export_*.json")) if export_dir.is_dir() else []
+            exports = _shared_export_files(export_dir, export_filename)
             rows.append(
                 {
                     "portal_project_id": portal_proj.name,
@@ -188,7 +207,7 @@ def list_local_doc_ids() -> list[str]:
     return sorted(p.stem.replace("export_", "", 1) for p in export_dir.glob("export_*.json"))
 
 
-def setup_mock(storage: str, portal_project_id: str, item_id: str, export_subdir: str) -> dict:
+def setup_mock(storage: str, portal_project_id: str, item_id: str, export_subdir: str, export_filename: str) -> dict:
     root = Path(storage)
     item_dir = root / portal_project_id / item_id
     export_dir = item_dir / export_subdir
@@ -199,7 +218,7 @@ def setup_mock(storage: str, portal_project_id: str, item_id: str, export_subdir
     if not sample_doc.exists():
         sample_doc.write_bytes(b"PK mock docx for reqcheck volume test")
 
-    sample_export = export_dir / f"export_{item_id}.json"
+    sample_export = export_dir / export_filename
     if not sample_export.exists():
         sample_export.write_text("[]\n", encoding="utf-8")
 
@@ -213,7 +232,13 @@ def setup_mock(storage: str, portal_project_id: str, item_id: str, export_subdir
     }
 
 
-def probe_export_write(storage: str, item_id: str, portal_project_id: Optional[str], export_subdir: str) -> dict:
+def probe_export_write(
+    storage: str,
+    item_id: str,
+    portal_project_id: Optional[str],
+    export_subdir: str,
+    export_filename: str,
+) -> dict:
     resolved = resolve_portal_project_id(storage, item_id, portal_project_id)
     if not resolved:
         return {"ok": False, "error": "item 不在共享卷，无法探针写入"}
@@ -228,7 +253,7 @@ def probe_export_write(storage: str, item_id: str, portal_project_id: Optional[s
         return {
             "ok": ok,
             "export_dir": str(export_dir),
-            "target_export": str(export_dir / f"export_{item_id}.json"),
+            "target_export": str(export_dir / export_filename),
         }
     except OSError as exc:
         return {"ok": False, "error": str(exc), "export_dir": str(export_dir)}
@@ -263,13 +288,16 @@ def main() -> int:
     args = parser.parse_args()
 
     export_subdir = _export_subdir()
+    export_filename = _export_filename()
     storage = _storage_path(args.mock)
 
     if args.setup_mock:
         if not args.portal_project_id or not args.item_id:
             print("错误: --setup-mock 需同时指定 --portal-project-id 和 --item-id", file=sys.stderr)
             return 2
-        info = setup_mock(args.setup_mock, args.portal_project_id, args.item_id, export_subdir)
+        info = setup_mock(
+            args.setup_mock, args.portal_project_id, args.item_id, export_subdir, export_filename
+        )
         if args.json:
             print(json.dumps(info, ensure_ascii=False, indent=2))
         else:
@@ -289,6 +317,7 @@ def main() -> int:
         "storage_path": storage,
         "storage_exists": bool(storage and Path(storage).is_dir()),
         "export_subdir": export_subdir,
+        "export_filename": export_filename,
         "local_workspaces": _local_dir(),
     }
 
@@ -297,7 +326,7 @@ def main() -> int:
             report["items"] = []
             report["error"] = "共享卷不可用"
         else:
-            report["items"] = list_shared_items(storage, export_subdir)
+            report["items"] = list_shared_items(storage, export_subdir, export_filename)
 
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -331,12 +360,15 @@ def main() -> int:
         parser.print_help()
         return 2
 
-    checks = [inspect_item(storage, iid, args.portal_project_id, export_subdir) for iid in item_ids]
+    checks = [
+        inspect_item(storage, iid, args.portal_project_id, export_subdir, export_filename)
+        for iid in item_ids
+    ]
     report["checks"] = checks
 
     if args.probe_export and storage and args.item_id:
         report["probe_export"] = probe_export_write(
-            storage, args.item_id, args.portal_project_id, export_subdir
+            storage, args.item_id, args.portal_project_id, export_subdir, export_filename
         )
 
     if args.json:
@@ -366,7 +398,7 @@ def main() -> int:
 
     print("\n--- 说明 ---")
     print("  in_shared_volume=是  -> 门户上传的项目，ReqCheck 可从共享卷读取")
-    print(f"  export_sync_ready=是 -> 调用 /api/export 时会写入 {export_subdir}/export_{{item_id}}.json")
+    print(f"  export_sync_ready=是 -> 调用 /api/export 时会写入 {export_subdir}/{export_filename}")
     print("  本地上传 doc_id 为文件哈希，通常不在共享卷，需从门户跳转使用 item UUID")
     print("=" * 60)
     return 0

@@ -11,6 +11,8 @@ LOCAL_WORKSPACES_DIR = os.environ.get(
 UNIPORTAL_STORAGE_PATH = os.environ.get("UNIPORTAL_STORAGE_PATH") or None
 # 导出 JSON 写入共享卷时，落在各 item 目录下的子目录名
 UNIPORTAL_EXPORT_SUBDIR = os.environ.get("UNIPORTAL_EXPORT_SUBDIR", "document-validator")
+# 共享卷导出 JSON 文件名（固定名；本地下载/缓存仍用 export_{doc_id}.json）
+UNIPORTAL_EXPORT_FILENAME = os.environ.get("UNIPORTAL_EXPORT_FILENAME", "requirement.json")
 
 UPLOAD_FOLDER = os.path.join(LOCAL_WORKSPACES_DIR, "uploads")
 PARSE_RESULTS_FOLDER = os.path.join(LOCAL_WORKSPACES_DIR, "parse_results")

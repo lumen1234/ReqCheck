@@ -17,6 +17,7 @@ services:
     environment:
       - UNIPORTAL_STORAGE_PATH=/data/uniportal
       - UNIPORTAL_EXPORT_SUBDIR=document-validator
+      - UNIPORTAL_EXPORT_FILENAME=requirement.json
       - LOCAL_WORKSPACES_DIR=/app/local_workspaces
     restart: unless-stopped
 

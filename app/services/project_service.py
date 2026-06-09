@@ -97,6 +97,10 @@ def get_uniportal_export_dir(
     return os.path.join(storage, resolved_portal_id, item_id, subdir)
 
 
+def uniportal_export_filename() -> str:
+    return current_app.config.get("UNIPORTAL_EXPORT_FILENAME", "requirement.json")
+
+
 def sync_export_to_uniportal(
     item_id: str,
     requirements: list[dict[str, Any]],
@@ -109,7 +113,7 @@ def sync_export_to_uniportal(
 
     try:
         os.makedirs(export_dir, exist_ok=True)
-        export_path = os.path.join(export_dir, f"export_{item_id}.json")
+        export_path = os.path.join(export_dir, uniportal_export_filename())
         with open(export_path, "w", encoding="utf-8") as f:
             json.dump(requirements, f, ensure_ascii=False, indent=2)
         return export_path

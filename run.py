@@ -8,8 +8,9 @@ if __name__ == '__main__':
     uni = app.config.get('UNIPORTAL_STORAGE_PATH')
     if uni:
         subdir = app.config.get('UNIPORTAL_EXPORT_SUBDIR', 'document-validator')
+        export_name = app.config.get('UNIPORTAL_EXPORT_FILENAME', 'requirement.json')
         print(f'UniPortal 集成已启用: UNIPORTAL_STORAGE_PATH={uni}')
-        print(f'导出 JSON 将同步至共享卷: {{portal_project_id}}/{{item_id}}/{subdir}/export_{{item_id}}.json')
+        print(f'导出 JSON 将同步至共享卷: {{portal_project_id}}/{{item_id}}/{subdir}/{export_name}')
     else:
         print('UniPortal 集成未启用（独立模式，仅本地上传；导出仅写 local_workspaces/export_results/）')
     app.run(debug=True, host='0.0.0.0', port=5000)

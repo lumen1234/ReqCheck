@@ -68,7 +68,7 @@ def _writable_probe(path: str, label: str) -> dict:
     return result
 
 
-def _scan_uniportal(storage: str, export_subdir: str) -> dict:
+def _scan_uniportal(storage: str, export_subdir: str, export_filename: str) -> dict:
     root = Path(storage)
     if not root.is_dir():
         return {"projects": []}
@@ -84,7 +84,13 @@ def _scan_uniportal(storage: str, export_subdir: str) -> dict:
             export_dir = item_dir / export_subdir
             exports = []
             if export_dir.is_dir():
-                exports = sorted(f.name for f in export_dir.glob("export_*.json"))
+                primary = export_dir / export_filename
+                if primary.is_file():
+                    exports.append(export_filename)
+                exports.extend(
+                    name for name in sorted(f.name for f in export_dir.glob("export_*.json"))
+                    if name not in exports
+                )
             doc_files = []
             for pattern in ("*.docx", "*.md", "*.txt"):
                 doc_files.extend(f.name for f in item_dir.rglob(pattern))
@@ -127,6 +133,7 @@ def main() -> int:
     local_dir = os.environ.get("LOCAL_WORKSPACES_DIR", config.LOCAL_WORKSPACES_DIR)
     uniportal = args.mock or os.environ.get("UNIPORTAL_STORAGE_PATH", config.UNIPORTAL_STORAGE_PATH)
     export_subdir = os.environ.get("UNIPORTAL_EXPORT_SUBDIR", config.UNIPORTAL_EXPORT_SUBDIR)
+    export_filename = os.environ.get("UNIPORTAL_EXPORT_FILENAME", config.UNIPORTAL_EXPORT_FILENAME)
 
     mode = "uniportal" if uniportal else "standalone"
     report = {
@@ -136,6 +143,7 @@ def main() -> int:
             "LOCAL_WORKSPACES_DIR": local_dir,
             "UNIPORTAL_STORAGE_PATH": uniportal,
             "UNIPORTAL_EXPORT_SUBDIR": export_subdir,
+            "UNIPORTAL_EXPORT_FILENAME": export_filename,
             "cwd": os.getcwd(),
             "in_docker": Path("/.dockerenv").exists(),
         },
@@ -150,7 +158,7 @@ def main() -> int:
             "path": uniportal,
             "exists": up.is_dir(),
             "is_mock": bool(args.mock),
-            "scan": _scan_uniportal(uniportal, export_subdir),
+            "scan": _scan_uniportal(uniportal, export_subdir, export_filename),
         }
 
     if args.probe:
@@ -171,7 +179,7 @@ def main() -> int:
     print(f"共享卷路径   : {uniportal or '(未设置)'}")
     if uniportal:
         print(f"  存在       : {_status(Path(uniportal).is_dir())}" + (" [mock]" if args.mock else ""))
-        print(f"  导出子目录 : {export_subdir}/export_{{item_id}}.json")
+        print(f"  共享卷导出   : {export_subdir}/{export_filename}")
 
     print("\n--- 私有工作区子目录 ---")
     for name, info in report["local_workspaces"]["subdirs"].items():
