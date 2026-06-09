@@ -10,7 +10,7 @@ LOCAL_WORKSPACES_DIR = os.environ.get(
 # UniPortal 共享卷（docker 挂载 /data/uniportal；导出 JSON 需读写权限，勿加 :ro）
 UNIPORTAL_STORAGE_PATH = os.environ.get("UNIPORTAL_STORAGE_PATH") or None
 # 导出 JSON 写入共享卷时，落在各 item 目录下的子目录名
-UNIPORTAL_EXPORT_SUBDIR = os.environ.get("UNIPORTAL_EXPORT_SUBDIR", "_reqcheck")
+UNIPORTAL_EXPORT_SUBDIR = os.environ.get("UNIPORTAL_EXPORT_SUBDIR", "document-validator")
 
 UPLOAD_FOLDER = os.path.join(LOCAL_WORKSPACES_DIR, "uploads")
 PARSE_RESULTS_FOLDER = os.path.join(LOCAL_WORKSPACES_DIR, "parse_results")

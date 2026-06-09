@@ -93,7 +93,7 @@ def get_uniportal_export_dir(
     storage = uniportal_storage_path()
     if not resolved_portal_id or not storage:
         return None
-    subdir = current_app.config.get("UNIPORTAL_EXPORT_SUBDIR", "_reqcheck")
+    subdir = current_app.config.get("UNIPORTAL_EXPORT_SUBDIR", "document-validator")
     return os.path.join(storage, resolved_portal_id, item_id, subdir)
 
 

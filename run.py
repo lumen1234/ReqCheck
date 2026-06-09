@@ -7,7 +7,7 @@ if __name__ == '__main__':
         print('警告: 未找到 frontend/dist/index.html，请先运行 scripts\\build-frontend.bat')
     uni = app.config.get('UNIPORTAL_STORAGE_PATH')
     if uni:
-        subdir = app.config.get('UNIPORTAL_EXPORT_SUBDIR', '_reqcheck')
+        subdir = app.config.get('UNIPORTAL_EXPORT_SUBDIR', 'document-validator')
         print(f'UniPortal 集成已启用: UNIPORTAL_STORAGE_PATH={uni}')
         print(f'导出 JSON 将同步至共享卷: {{portal_project_id}}/{{item_id}}/{subdir}/export_{{item_id}}.json')
     else:

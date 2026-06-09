@@ -9,13 +9,14 @@ services:
       - "5000:5000"
     volumes:
       # 与 UniPortal 共用 external 卷 uniportal_storage（须先启动 UniPortal 创建该卷）
-      # ReqCheck 需读写：导出 JSON 写入 {item_id}/_reqcheck/（其他子工具通常 :ro）
+      # ReqCheck 需读写：导出 JSON 写入 {item_id}/document-validator/（其他子工具通常 :ro）
       - uniportal_storage:/data/uniportal
       - reqcheck_local:/app/local_workspaces
       # 本地开发可改为绑定目录（与 Windows 代码目录同步）：
       # - ./local_workspaces:/app/local_workspaces
     environment:
       - UNIPORTAL_STORAGE_PATH=/data/uniportal
+      - UNIPORTAL_EXPORT_SUBDIR=document-validator
       - LOCAL_WORKSPACES_DIR=/app/local_workspaces
     restart: unless-stopped
 

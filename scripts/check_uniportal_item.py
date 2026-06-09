@@ -366,7 +366,7 @@ def main() -> int:
 
     print("\n--- 说明 ---")
     print("  in_shared_volume=是  -> 门户上传的项目，ReqCheck 可从共享卷读取")
-    print("  export_sync_ready=是 -> 调用 /api/export 时会写入 _reqcheck/export_{item_id}.json")
+    print(f"  export_sync_ready=是 -> 调用 /api/export 时会写入 {export_subdir}/export_{{item_id}}.json")
     print("  本地上传 doc_id 为文件哈希，通常不在共享卷，需从门户跳转使用 item UUID")
     print("=" * 60)
     return 0
