@@ -13,6 +13,7 @@
     "axios": "^1.6.2",
     "element-plus": "^2.13.2",
     "highlight.js": "^11.9.0",
+    "katex": "^0.17.0",
     "lucide-vue-next": "^0.294.0",
     "vue": "^3.3.11",
     "vue-router": "^4.2.5"

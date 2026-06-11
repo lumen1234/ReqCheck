@@ -11,6 +11,7 @@ from docx.oxml.ns import qn
 
 from app.parsers.asset_store import AssetStore
 from app.parsers.block_utils import make_heading_block, split_lines_heading_body
+from app.parsers.formula_utils import docx_cell_text, docx_paragraph_text
 from app.parsers.heading_detector import is_toc_line, parse_heading_line
 from app.parsers.models import DocumentBlock, TableData
 from app.parsers.section_registry import SectionContext, is_not_section_title
@@ -74,7 +75,7 @@ class DocxExtractor:
         asset_store: AssetStore,
         next_paragraph: Optional[Paragraph] = None,
     ) -> List[DocumentBlock]:
-        text = paragraph.text.strip()
+        text = docx_paragraph_text(paragraph)
         blocks: List[DocumentBlock] = []
 
         for image in _extract_inline_images(paragraph, doc, asset_store, next_paragraph):
@@ -189,7 +190,7 @@ def _table_to_data(table: Table) -> TableData:
             if cell_id in seen:
                 continue
             seen.add(cell_id)
-            cells.append(cell.text.strip())
+            cells.append(docx_cell_text(cell))
         if cells:
             rows_data.append(cells)
 

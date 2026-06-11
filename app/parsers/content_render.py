@@ -3,9 +3,66 @@ import html
 import re
 from typing import Any, Dict, List
 
+LATEX_BLOCK_RE = re.compile(r'\$\$(.+?)\$\$', re.DOTALL)
+LATEX_INLINE_RE = re.compile(r'(?<!\$)\$(?!\$)([^\$\n]+?)(?<!\$)\$(?!\$)')
+
 
 def _esc(text: str) -> str:
     return html.escape(text or '')
+
+
+def _latex_attr(latex: str) -> str:
+    return html.escape(latex or '', quote=True)
+
+
+def render_latex_in_html(text: str) -> str:
+    """将 $...$ / $$...$$ 转为 KaTeX 占位元素（由前端渲染）。"""
+    if not text:
+        return ''
+
+    chunks: List[str] = []
+    pos = 0
+    while pos < len(text):
+        block_start = text.find('$$', pos)
+        inline_start = text.find('$', pos)
+        if block_start == -1 and inline_start == -1:
+            chunks.append(_esc(text[pos:]))
+            break
+
+        use_block = block_start != -1 and (inline_start == -1 or block_start <= inline_start)
+        if use_block:
+            if block_start > pos:
+                chunks.append(_esc(text[pos:block_start]))
+            block_end = text.find('$$', block_start + 2)
+            if block_end == -1:
+                chunks.append(_esc(text[block_start:]))
+                break
+            latex = text[block_start + 2:block_end].strip()
+            if latex:
+                chunks.append(
+                    f'<div class="math-block" data-latex="{_latex_attr(latex)}"></div>'
+                )
+            pos = block_end + 2
+            continue
+
+        if inline_start > pos:
+            chunks.append(_esc(text[pos:inline_start]))
+        inline_end = text.find('$', inline_start + 1)
+        if inline_end == -1:
+            chunks.append(_esc(text[inline_start:]))
+            break
+        latex = text[inline_start + 1:inline_end].strip()
+        if latex:
+            chunks.append(
+                f'<span class="math-inline" data-latex="{_latex_attr(latex)}"></span>'
+            )
+        else:
+            chunks.append(_esc('$'))
+            pos = inline_start + 1
+            continue
+        pos = inline_end + 1
+
+    return ''.join(chunks)
 
 
 def _strip_markdown_tables(text: str) -> str:
@@ -45,7 +102,10 @@ def table_to_html(table: Dict[str, Any]) -> str:
         for row in rows:
             parts.append('<tr>')
             for cell in row:
-                parts.append(f'<td style="border:1px solid #ccc;padding:6px">{_esc(str(cell))}</td>')
+                parts.append(
+                    f'<td style="border:1px solid #ccc;padding:6px">'
+                    f'{render_latex_in_html(str(cell))}</td>'
+                )
             parts.append('</tr>')
         parts.append('</tbody>')
     parts.append('</table>')
@@ -147,7 +207,8 @@ def enrich_node_display(node: Dict[str, Any], doc_id: str = '') -> Dict[str, Any
         for para in display.split('\n\n'):
             p = para.strip()
             if p:
-                html_parts.append(f'<p style="margin:0 0 12px;line-height:1.6">{_esc(p).replace(chr(10), "<br/>")}</p>')
+                body = render_latex_in_html(p).replace('\n', '<br/>')
+                html_parts.append(f'<p style="margin:0 0 12px;line-height:1.6">{body}</p>')
 
     for table in node.get('tables') or []:
         tbl_html = table_to_html(table)

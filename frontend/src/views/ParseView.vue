@@ -61,6 +61,7 @@
               </div>
               <div
                 v-if="selectedNode.content_html"
+                ref="contentHtmlRef"
                 class="parse-content prose prose-sm max-w-none text-slate-700"
                 v-html="selectedNode.content_html"
               />
@@ -121,12 +122,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getParseResult } from '../api'
 import { FileText, ChevronRight } from 'lucide-vue-next'
 import RequirementTree from '../components/RequirementTree.vue'
 import { withPortalQuery } from '../utils/portal'
+import { renderMathInElement } from '../utils/mathRender'
 
 const router = useRouter()
 const route = useRoute()
@@ -137,6 +139,13 @@ const documentName = computed(() => route.query.docName || '未命名文档')
 const loading = ref(false)
 const requirementTree = ref(null)
 const selectedNode = ref(null)
+const contentHtmlRef = ref(null)
+
+const renderNodeMath = () => {
+  nextTick(() => {
+    renderMathInElement(contentHtmlRef.value)
+  })
+}
 
 const transformNode = (node) => {
   const transformed = {
@@ -230,6 +239,7 @@ const treeData = computed(() => convertToTreeData(requirementTree.value))
 
 const selectNode = (node) => {
   selectedNode.value = node ? { ...node } : null
+  renderNodeMath()
 }
 
 const handleNodeClick = (data) => {
@@ -395,6 +405,11 @@ const loadRequirementTree = async () => {
 onMounted(() => {
   loadRequirementTree()
 })
+
+watch(
+  () => selectedNode.value?.content_html,
+  () => renderNodeMath()
+)
 </script>
 
 <style scoped>
@@ -412,5 +427,14 @@ onMounted(() => {
 }
 .parse-content :deep(.req-table th) {
   background: #f5f5f5;
+}
+.parse-content :deep(.math-block) {
+  margin: 12px 0;
+  overflow-x: auto;
+  text-align: center;
+}
+.parse-content :deep(.math-inline) {
+  display: inline-block;
+  vertical-align: middle;
 }
 </style>

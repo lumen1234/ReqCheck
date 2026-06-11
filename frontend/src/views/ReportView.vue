@@ -82,6 +82,7 @@
               </div>
               <div
                 v-if="selectedNode.content_html"
+                ref="contentHtmlRef"
                 class="report-content prose prose-sm max-w-none text-slate-700"
                 v-html="selectedNode.content_html"
               />
@@ -171,11 +172,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { exportRequirements } from '../api'
 import { Download, RotateCw, FileText } from 'lucide-vue-next'
 import RequirementTree from '../components/RequirementTree.vue'
+import { renderMathInElement } from '../utils/mathRender'
 
 const router = useRouter()
 const route = useRoute()
@@ -186,6 +188,13 @@ const documentId = computed(() => route.params.documentId)
 const loading = ref(false)
 const flatRequirements = ref([])
 const selectedNode = ref(null)
+const contentHtmlRef = ref(null)
+
+const renderNodeMath = () => {
+  nextTick(() => {
+    renderMathInElement(contentHtmlRef.value)
+  })
+}
 
 /**
  * 将扁平的需求列表转换为树形结构
@@ -343,6 +352,7 @@ const handleNodeClick = (data, node, component) => {
 // 选择节点
 const selectNode = (node) => {
   selectedNode.value = node
+  renderNodeMath()
 }
 
 // 获取验证状态样式类
@@ -396,6 +406,7 @@ const loadRequirements = async () => {
     // 自动选择第一个根节点
     if (treeData.value && treeData.value.length > 0) {
       selectedNode.value = treeData.value[0]
+      renderNodeMath()
     }
   } catch (error) {
     console.error('Failed to load requirements:', error)
@@ -408,6 +419,11 @@ const loadRequirements = async () => {
 onMounted(() => {
   loadRequirements()
 })
+
+watch(
+  () => selectedNode.value?.content_html,
+  () => renderNodeMath()
+)
 </script>
 
 <style scoped>
@@ -425,5 +441,14 @@ onMounted(() => {
 }
 .report-content :deep(.req-table th) {
   background: #f5f5f5;
+}
+.report-content :deep(.math-block) {
+  margin: 12px 0;
+  overflow-x: auto;
+  text-align: center;
+}
+.report-content :deep(.math-inline) {
+  display: inline-block;
+  vertical-align: middle;
 }
 </style>
