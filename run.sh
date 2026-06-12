@@ -9,7 +9,7 @@ docker rm -f reqcheck_container 2>/dev/null || true
 
 IMAGE="${IMAGE:-reqcheck:latest}"
 
-docker run -d -p 5000:5000 \
+docker run -d -p 8001:5000 \
   -v uniportal_storage:/data/uniportal \
   -v "$(pwd)/local_workspaces:/app/local_workspaces" \
   -e UNIPORTAL_STORAGE_PATH=/data/uniportal \
