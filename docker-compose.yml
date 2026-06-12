@@ -6,7 +6,7 @@ services:
     image: reqcheck
     container_name: reqcheck
     ports:
-      - "5000:5000"
+      - "8001:5000"
     volumes:
       # 与 UniPortal 共用 external 卷 uniportal_storage（须先启动 UniPortal 创建该卷）
       # ReqCheck 需读写：导出 JSON 写入 {item_id}/document-validator/（其他子工具通常 :ro）
