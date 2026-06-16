@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List, Optional
 
 from docx import Document
@@ -12,7 +13,7 @@ from docx.oxml.ns import qn
 from app.parsers.asset_store import AssetStore
 from app.parsers.block_utils import make_heading_block, split_lines_heading_body
 from app.parsers.formula_utils import docx_cell_text, docx_paragraph_text
-from app.parsers.heading_detector import is_toc_line, parse_heading_line
+from app.parsers.heading_detector import is_toc_line, looks_like_body_section_title, parse_heading_line
 from app.parsers.models import DocumentBlock, TableData
 from app.parsers.section_registry import SectionContext, is_not_section_title
 
@@ -32,6 +33,20 @@ HEADING_STYLES = {
 TOC_STYLES = {
     'toc 1', 'toc 2', 'toc 3', 'toc 4', 'toc 5', 'toc 6', 'toc 7', 'toc 8', 'toc 9',
     '目录 1', '目录 2', '目录 3',
+}
+
+_TEMPLATE_REQUIREMENT_START_RE = re.compile(r'^\s*需求标识\s*[:：]\s*\S+')
+_TEMPLATE_FIELD_RE = re.compile(r'^\s*[^:：\s]{2,20}\s*[:：]\s*.+$')
+
+_LENIENT_TOP_TITLES = {
+    '更改登记',
+    '目录',
+    '范围',
+    '引用文档',
+    '需求',
+    '合格性规定',
+    '需求可追踪性',
+    '注释',
 }
 
 
@@ -67,6 +82,79 @@ class DocxExtractor:
                                     blocks.append(DocumentBlock(type='image', image=image))
             i += 1
         return blocks
+
+    def extract_lenient(self, filepath: str, asset_store: AssetStore) -> List[DocumentBlock]:
+        """宽松提取模板文档。
+
+        标准解析要求先识别到「1 范围」等正文起点。模板文档常只有无编号标题或
+        占位段落，这里保留所有正文内容，并尽量用 Word 标题样式/短标题切分结构。
+        """
+        doc = Document(filepath)
+        body_items = list(_iter_block_items(doc))
+        blocks: List[DocumentBlock] = []
+
+        for item in body_items:
+            if isinstance(item, Paragraph):
+                blocks.extend(self._parse_lenient_paragraph(item, doc, asset_store))
+            elif isinstance(item, Table):
+                table = _table_to_data(item)
+                if table.headers or table.rows:
+                    blocks.append(DocumentBlock(type='table', table=table))
+                for row in item.rows:
+                    for cell in row.cells:
+                        for cell_para in cell.paragraphs:
+                            for image in _extract_inline_images(cell_para, doc, asset_store):
+                                blocks.append(DocumentBlock(type='image', image=image))
+        return blocks
+
+    def _parse_lenient_paragraph(
+        self,
+        paragraph: Paragraph,
+        doc: Document,
+        asset_store: AssetStore,
+    ) -> List[DocumentBlock]:
+        text = docx_paragraph_text(paragraph)
+        blocks: List[DocumentBlock] = []
+
+        for image in _extract_inline_images(paragraph, doc, asset_store):
+            blocks.append(DocumentBlock(type='image', image=image))
+
+        if not text or is_toc_line(text):
+            return blocks
+
+        style_name = ''
+        if paragraph.style and paragraph.style.name:
+            style_name = paragraph.style.name.lower()
+        if style_name in TOC_STYLES:
+            return blocks
+
+        if '\n' in text:
+            split_blocks = split_lines_heading_body(text)
+            if split_blocks and split_blocks[0].type == 'heading':
+                return blocks + split_blocks
+
+        numbered = parse_heading_line(text)
+        if numbered:
+            number, label, level = numbered
+            return blocks + [make_heading_block(number, label, level, text=text)]
+
+        outline_level = _paragraph_outline_level_from_style(style_name)
+        if outline_level:
+            return blocks + [make_heading_block(None, text, outline_level, text=text)]
+
+        if _is_template_requirement_start(text):
+            return blocks + [make_heading_block(None, text, 2, text=text)]
+
+        # 模板中的「需求来源:N/A」「安全性影响:N/A」等字段应作为当前需求内容，
+        # 否则会被短文本规则误判成一堆 level 1 标题。
+        if _is_template_metadata_field(text):
+            return blocks + [DocumentBlock(type='paragraph', text=text)]
+
+        if looks_like_body_section_title(text):
+            level = 1 if _is_lenient_top_title(text) else 2
+            return blocks + [make_heading_block(None, text, level, text=text)]
+
+        return blocks + [DocumentBlock(type='paragraph', text=text)]
 
     def _parse_paragraph(
         self,
@@ -163,6 +251,22 @@ class DocxExtractor:
 
 def _paragraph_outline_level_from_style(style_name: str) -> Optional[int]:
     return HEADING_STYLES.get(style_name)
+
+
+def _is_template_requirement_start(text: str) -> bool:
+    return bool(_TEMPLATE_REQUIREMENT_START_RE.match(text or ''))
+
+
+def _is_template_metadata_field(text: str) -> bool:
+    text = (text or '').strip()
+    if not text or _is_template_requirement_start(text):
+        return False
+    return bool(_TEMPLATE_FIELD_RE.match(text))
+
+
+def _is_lenient_top_title(text: str) -> bool:
+    normalized = (text or '').strip().replace(' ', '').replace('\u3000', '')
+    return normalized in _LENIENT_TOP_TITLES
 
 
 def _iter_block_items(parent):

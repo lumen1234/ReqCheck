@@ -7,6 +7,7 @@ from app.parsers.extractors import get_extractor
 from app.parsers.preamble import strip_preamble
 from app.parsers.tree_builder import build_requirement_tree
 from app.parsers.content_render import enrich_tree_display
+from app.parsers.models import DocumentBlock
 
 
 def _file_ext(filepath: str) -> str:
@@ -30,13 +31,65 @@ def parse_document_to_tree(
     blocks = strip_preamble(blocks)
 
     if not any(b.type == 'heading' for b in blocks):
-        raise ValueError(
-            '未识别到符合 GB/T 8567 编号或 Markdown 标题格式的章节，'
-            '请检查文档是否包含如 1、1.1、第1章 或 # 标题 等结构。'
-        )
+        lenient_extract = getattr(extractor, 'extract_lenient', None)
+        if callable(lenient_extract):
+            blocks = lenient_extract(filepath, asset_store)
+            blocks = strip_preamble(blocks)
+
+    if not any(b.type == 'heading' for b in blocks):
+        tree = _build_fallback_tree(blocks, root_label=filename, doc_id=doc_id)
+        return enrich_tree_display(tree, doc_id=doc_id)
 
     tree = build_requirement_tree(blocks, root_label=filename, doc_id=doc_id)
     return enrich_tree_display(tree, doc_id=doc_id)
+
+
+def _build_fallback_tree(
+    blocks: list[DocumentBlock],
+    root_label: str,
+    doc_id: str,
+) -> Dict[str, Any]:
+    """在模板无可识别标题时生成单节点树，避免整篇文档解析失败。"""
+    node: Dict[str, Any] = {
+        'id': 'node_inferred_1',
+        'label': '文档内容',
+        'content': None,
+        'level': 1,
+        'v_status': True,
+        'e_status': 'pending',
+        'children': [],
+    }
+    content_parts = []
+    table_counter = 0
+    image_counter = 0
+
+    for block in blocks:
+        if block.type == 'paragraph' and block.text:
+            content_parts.append(block.text.strip())
+        elif block.type == 'table' and block.table:
+            table_counter += 1
+            table = block.table.to_dict()
+            table['id'] = f'tbl_{table_counter:03d}'
+            node.setdefault('tables', []).append(table)
+        elif block.type == 'image' and block.image:
+            image_counter += 1
+            image = block.image.to_dict(doc_id)
+            image['id'] = image.get('id') or f'img_{image_counter:03d}'
+            node.setdefault('images', []).append(image)
+
+    content = '\n'.join(p for p in content_parts if p).strip()
+    if content:
+        node['content'] = content
+
+    return {
+        'id': 'root',
+        'label': root_label,
+        'content': None,
+        'level': 0,
+        'v_status': True,
+        'e_status': 'pending',
+        'children': [node],
+    }
 
 
 def compute_document_text_hash(filepath: str) -> str:
