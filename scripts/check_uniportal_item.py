@@ -34,6 +34,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 import config  # noqa: E402
+from app.services.uniportal_paths import export_dir_for_item  # noqa: E402
 
 DOC_EXTS = {".docx", ".md", ".markdown", ".txt"}
 
@@ -147,7 +148,7 @@ def inspect_item(
         return result
 
     item_dir = storage_path / resolved_portal / item_id
-    export_dir = item_dir / export_subdir
+    export_dir = Path(export_dir_for_item(str(item_dir), export_subdir))
     export_files = _shared_export_files(export_dir, export_filename)
 
     result.update(
@@ -186,7 +187,7 @@ def list_shared_items(storage: str, export_subdir: str, export_filename: str) ->
         for item_dir in sorted(portal_proj.iterdir()):
             if not item_dir.is_dir() or item_dir.name.startswith("."):
                 continue
-            export_dir = item_dir / export_subdir
+            export_dir = Path(export_dir_for_item(str(item_dir), export_subdir))
             exports = _shared_export_files(export_dir, export_filename)
             rows.append(
                 {
@@ -243,7 +244,8 @@ def probe_export_write(
     if not resolved:
         return {"ok": False, "error": "item 不在共享卷，无法探针写入"}
 
-    export_dir = Path(storage) / resolved / item_id / export_subdir
+    item_dir = Path(storage) / resolved / item_id
+    export_dir = Path(export_dir_for_item(str(item_dir), export_subdir))
     probe_path = export_dir / f".probe_export_{datetime.now().strftime('%H%M%S')}.json"
     try:
         export_dir.mkdir(parents=True, exist_ok=True)

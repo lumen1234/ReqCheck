@@ -9,6 +9,8 @@ from typing import Any, Iterable, Optional
 
 from flask import current_app
 
+from app.services.uniportal_paths import export_dir_for_item, find_primary_document
+
 
 @dataclass
 class ProjectEntry:
@@ -88,13 +90,17 @@ def get_uniportal_export_dir(
     item_id: str,
     portal_project_id: Optional[str] = None,
 ) -> Optional[str]:
-    """返回共享卷中该 item 的导出目录（不存在则调用方负责 makedirs）。"""
-    resolved_portal_id = resolve_portal_project_id_for_item(item_id, portal_project_id)
+    """返回共享卷导出目录：与主文档同层（如 MEMS陀螺软件-new/document-validator/）。"""
+    item_dir = resolve_project_dir(item_id, portal_project_id=portal_project_id)
     storage = uniportal_storage_path()
-    if not resolved_portal_id or not storage:
+    if not item_dir or not storage:
+        return None
+    item_dir = os.path.normpath(item_dir)
+    storage = os.path.normpath(storage)
+    if not item_dir.startswith(storage):
         return None
     subdir = current_app.config.get("UNIPORTAL_EXPORT_SUBDIR", "document-validator")
-    return os.path.join(storage, resolved_portal_id, item_id, subdir)
+    return export_dir_for_item(item_dir, subdir)
 
 
 def uniportal_export_filename() -> str:
@@ -185,28 +191,9 @@ def _pick_display_name(item_dir: str, project_id: str) -> str:
 
 def find_document_file(root: str) -> Optional[str]:
     """在目录树中找第一个支持的文档文件，优先 docx > md > txt。"""
-    allowed = _allowed_extensions()
-    priority = [".docx", ".md", ".markdown", ".txt"]
-    found: list[tuple[int, str]] = []
-
-    for dirpath, _, filenames in os.walk(root):
-        for name in filenames:
-            if name.startswith("."):
-                continue
-            ext = os.path.splitext(name)[1].lower().lstrip(".")
-            if ext not in allowed:
-                continue
-            full = os.path.join(dirpath, name)
-            try:
-                prio = priority.index(ext) if ext in priority else len(priority)
-            except ValueError:
-                prio = len(priority)
-            found.append((prio, full))
-
-    if not found:
-        return None
-    found.sort(key=lambda x: (x[0], x[1]))
-    return found[0][1]
+    subdir = current_app.config.get("UNIPORTAL_EXPORT_SUBDIR", "document-validator")
+    allowed = frozenset(_allowed_extensions())
+    return find_primary_document(root, skip_subdir=subdir, allowed_extensions=allowed)
 
 
 def resolve_document(project_id: str, portal_project_id: Optional[str] = None) -> Optional[ResolvedDocument]:

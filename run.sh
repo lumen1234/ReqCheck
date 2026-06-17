@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-docker rm -f reqcheck_container 2>/dev/null || true
+docker rm -f reqcheck 2>/dev/null || true
 
 IMAGE="${IMAGE:-reqcheck:latest}"
 
@@ -13,10 +13,12 @@ docker run -d -p 8001:5000 \
   -v uniportal_storage:/data/uniportal \
   -v "$(pwd)/local_workspaces:/app/local_workspaces" \
   -e UNIPORTAL_STORAGE_PATH=/data/uniportal \
+  -e UNIPORTAL_EXPORT_SUBDIR=document-validator \
+  -e UNIPORTAL_EXPORT_FILENAME=requirement.json \
   -e LOCAL_WORKSPACES_DIR=/app/local_workspaces \
-  --name reqcheck_container \
-  --restart=always \
+  --name reqcheck \
+  --restart=unless-stopped \
   "$IMAGE"
 
-echo "ReqCheck 已启动: http://localhost:5000"
-echo "验证: docker exec reqcheck_container python scripts/verify_uniportal_integration.py"
+echo "ReqCheck 已启动: http://localhost:8001"
+echo "验证: docker exec reqcheck python scripts/verify_uniportal_integration.py"
