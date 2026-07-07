@@ -8,8 +8,19 @@
           <p class="text-slate-500 font-medium mt-2">审查软件需求文档完整性与准确性</p>
         </div>
         
-        <!-- Statistics -->
-        <div v-if="validationData.length > 0" class="flex items-center space-x-4">
+        <div class="flex items-center space-x-4">
+          <button
+            @click="loadValidateResult(true)"
+            :disabled="loading"
+            class="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-all flex items-center gap-2"
+            title="重新验证文档"
+          >
+            <RotateCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />
+            刷新
+          </button>
+
+          <!-- Statistics -->
+          <template v-if="validationData.length > 0">
           <div class="text-center px-4 py-2 bg-slate-50 rounded-lg">
             <p class="text-xs text-slate-500 font-medium">总需求数</p>
             <p class="text-2xl font-bold text-slate-900">{{ totalCount }}</p>
@@ -26,6 +37,7 @@
             <p class="text-xs text-blue-600 font-medium">通过率</p>
             <p class="text-2xl font-bold text-blue-700">{{ passRate }}%</p>
           </div>
+          </template>
         </div>
       </div>
     </div>
@@ -57,8 +69,19 @@
           </button>
         </div>
 
-        <!-- Validation Results List -->
-        <div v-else class="space-y-3">
+        <div v-else>
+          <!-- Stale / fallback warning -->
+          <div
+            v-if="showFallbackWarning"
+            class="mb-4 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm leading-relaxed"
+          >
+            当前结果是<strong>历史缓存</strong>，生成时大模型 API 调用失败（配置未生效或 Base URL 有误）。
+            LLM 配置已更新后，请点击右上角 <strong>刷新</strong> 重新审查。
+            <span v-if="isCached" class="block mt-1 text-amber-700">（本次加载使用了缓存，未重新调用大模型）</span>
+          </div>
+
+          <!-- Validation Results List -->
+          <div class="space-y-3">
           <div 
             v-for="(item, index) in sortedValidationData" 
             :key="item.id"
@@ -118,6 +141,7 @@
               </div>
             </div>
           </div>
+          </div>
         </div>
       </div>
     </div>
@@ -143,7 +167,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getReviewResult } from '../api'
 import { withPortalQuery } from '../utils/portal'
-import { FileText, ChevronRight, CheckCircle, XCircle } from 'lucide-vue-next'
+import { FileText, ChevronRight, CheckCircle, XCircle, RotateCw } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -154,6 +178,19 @@ const documentName = computed(() => route.query.docName || '未命名文档')
 
 const loading = ref(false)
 const validationData = ref([])
+const isCached = ref(false)
+
+const FALLBACK_REASON_MARKERS = [
+  '由于网络原因，大模型验证暂时不可用',
+  '由于大模型验证暂时不可用',
+  '大模型 API 调用失败',
+]
+
+const showFallbackWarning = computed(() =>
+  validationData.value.some(item =>
+    FALLBACK_REASON_MARKERS.some(marker => (item.reason || '').includes(marker))
+  )
+)
 
 // 计算节点层级
 const calculateLevel = (nodeId, parentId, allNodes) => {
@@ -223,11 +260,14 @@ const loadValidateResult = async (force = false) => {
   }
   
   loading.value = true
+  isCached.value = false
   try {
     const result = await getReviewResult(
       documentId.value,
       force ? { force: 1 } : {}
     )
+    
+    isCached.value = Boolean(result.cached)
     
     // 处理后端返回的数据格式
     // 后端返回格式: { validation_results: [...] }

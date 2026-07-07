@@ -39,6 +39,7 @@
             class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
           />
           <p class="text-xs text-slate-400 mt-1">
+            DeepSeek 示例：<code>https://api.deepseek.com/v1</code>（勿填 <code>platform.deepseek.com</code> 控制台地址）<br />
             阿里百炼私有版示例：<code>https://&lt;your-host&gt;/compatible-mode/v1</code>
           </p>
         </div>
@@ -174,6 +175,13 @@ async function save() {
   saving.value = true
   testResult.value = null
   try {
+    const baseUrl = form.value.base_url.trim()
+    if (baseUrl.includes('platform.deepseek.com')) {
+      form.value.base_url = 'https://api.deepseek.com/v1'
+    } else if (/^https?:\/\/api\.deepseek\.com\/?$/i.test(baseUrl)) {
+      form.value.base_url = 'https://api.deepseek.com/v1'
+    }
+
     await saveLLMConfig({
       api_key: form.value.api_key,
       base_url: form.value.base_url,
@@ -195,6 +203,13 @@ async function testConnection() {
   testing.value = true
   testResult.value = null
   try {
+    const baseUrl = form.value.base_url.trim()
+    if (baseUrl.includes('platform.deepseek.com')) {
+      form.value.base_url = 'https://api.deepseek.com/v1'
+    } else if (/^https?:\/\/api\.deepseek\.com\/?$/i.test(baseUrl)) {
+      form.value.base_url = 'https://api.deepseek.com/v1'
+    }
+
     // 先将表单当前值持久化，确保测试使用的是输入框中的最新值
     await saveLLMConfig({
       api_key: form.value.api_key,

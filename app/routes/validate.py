@@ -3,6 +3,7 @@ from typing import List
 from flask import Blueprint, request, jsonify
 from app import app
 from app.models import db, ValidationResult, LLMConfig
+from app.services.llm_config import build_chat_completions_url
 from app.services.workspace import parse_results_folder, validate_results_folder
 import os
 import requests
@@ -363,13 +364,18 @@ def validate_batch(req_tree, rules):
         _model = _cfg.model if _cfg else app.config['API_MODEL_DEFAULT']
         _api_key = _cfg.api_key if _cfg else app.config['API_KEY_DEFAULT']
         _api_url = _cfg.base_url if _cfg else app.config['API_URL_DEFAULT']
-        model_response = call_deepseek_api(
-            prompt,
-            _model,
-            _api_key,
-            _api_url
-        )
-        
+        try:
+            model_response = call_deepseek_api(
+                prompt,
+                _model,
+                _api_key,
+                _api_url
+            )
+        except Exception as e:
+            print(f"API调用失败: {str(e)}")
+            all_results.extend(generate_default_results(batch_nodes, str(e)))
+            continue
+
         try:
             print(f"API响应: {model_response[:200]}...")
             
@@ -498,7 +504,7 @@ def call_deepseek_api(prompt, model, api_key, api_url):
         session.trust_env = False
         
         response = session.post(
-            api_url + '/chat/completions',
+            build_chat_completions_url(api_url),
             headers=headers,
             json=data,
             timeout=app.config.get('API_TIMEOUT', 270)
@@ -507,18 +513,21 @@ def call_deepseek_api(prompt, model, api_key, api_url):
         result = response.json()
         return result['choices'][0]['message']['content']
     except Exception as e:
-        print(f"API调用失败: {str(e)}")
-        return '{"result": true, "reason": "由于网络原因，大模型验证暂时不可用，默认标记为合规。"}'
+        raise RuntimeError(str(e)) from e
 
-def generate_default_results(nodes):
+def generate_default_results(nodes, error_message: str = ''):
     """生成默认验证结果"""
+    if error_message:
+        reason = f'大模型 API 调用失败（{error_message}），默认标记为合规。'
+    else:
+        reason = '由于大模型验证暂时不可用，默认标记为合规。'
     results = []
     for node in nodes:
         results.append({
             'id': node['id'],
             'name': node['name'],
             'result': True,
-            'reason': '由于大模型验证暂时不可用，默认标记为合规。',
+            'reason': reason,
             'parent_id': node.get('parent_id')
         })
     return results

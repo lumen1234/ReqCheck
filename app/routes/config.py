@@ -1,6 +1,11 @@
 from flask import Blueprint, request, jsonify
 from app import app
 from app.models import db, LLMConfig
+from app.services.llm_config import (
+    build_chat_completions_url,
+    format_llm_request_error,
+    normalize_llm_base_url,
+)
 import requests
 
 config_bp = Blueprint('config', __name__)
@@ -34,7 +39,7 @@ def save_llm_config():
         return jsonify({'success': False, 'error': 'Invalid JSON body'}), 400
 
     api_key = data.get('api_key', '').strip()
-    base_url = data.get('base_url', '').strip()
+    base_url = normalize_llm_base_url(data.get('base_url', '').strip())
     model = data.get('model', '').strip()
 
     if not api_key or not base_url or not model:
@@ -57,7 +62,7 @@ def save_llm_config():
 def test_llm_config():
     cfg = get_llm_config()
 
-    url = cfg['base_url'].rstrip('/') + '/chat/completions'
+    url = build_chat_completions_url(cfg['base_url'])
     headers = {
         'Authorization': f"Bearer {cfg['api_key']}",
         'Content-Type': 'application/json',
@@ -75,4 +80,4 @@ def test_llm_config():
         reply = resp.json()['choices'][0]['message']['content']
         return jsonify({'ok': True, 'model': cfg['model'], 'reply': reply})
     except requests.exceptions.RequestException as e:
-        return jsonify({'ok': False, 'error': str(e)})
+        return jsonify({'ok': False, 'error': format_llm_request_error(e, cfg['base_url'])})

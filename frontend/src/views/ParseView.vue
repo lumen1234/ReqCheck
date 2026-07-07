@@ -2,9 +2,20 @@
   <div class="h-full flex flex-col bg-white">
     <!-- Header -->
     <div class="border-b border-slate-200 px-8 py-6">
-      <div class="max-w-7xl mx-auto">
-        <h1 class="text-3xl font-bold text-slate-900">文档分析</h1>
-        <p class="text-slate-500 font-medium mt-2">解析文档并提取需求结构树</p>
+      <div class="max-w-7xl mx-auto flex items-center justify-between">
+        <div>
+          <h1 class="text-3xl font-bold text-slate-900">文档分析</h1>
+          <p class="text-slate-500 font-medium mt-2">解析文档并提取需求结构树</p>
+        </div>
+        <button
+          @click="loadRequirementTree(true)"
+          :disabled="loading"
+          class="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-all flex items-center gap-2"
+          title="重新解析文档"
+        >
+          <RotateCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />
+          刷新
+        </button>
       </div>
     </div>
 
@@ -125,7 +136,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getParseResult } from '../api'
-import { FileText, ChevronRight } from 'lucide-vue-next'
+import { FileText, ChevronRight, RotateCw } from 'lucide-vue-next'
 import RequirementTree from '../components/RequirementTree.vue'
 import { withPortalQuery } from '../utils/portal'
 import { renderMathInElement } from '../utils/mathRender'
@@ -387,12 +398,12 @@ const goToNext = () => {
   })
 }
 
-const loadRequirementTree = async () => {
+const loadRequirementTree = async (force = false) => {
   if (!documentId.value) return
 
   loading.value = true
   try {
-    const result = await getParseResult(documentId.value)
+    const result = await getParseResult(documentId.value, { force })
     requirementTree.value = result.requirement_tree.children || null
     selectInitialNode()
   } catch (error) {
