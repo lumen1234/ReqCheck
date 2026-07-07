@@ -31,12 +31,6 @@ def parse_document_to_tree(
     blocks = strip_preamble(blocks)
 
     if not any(b.type == 'heading' for b in blocks):
-        lenient_extract = getattr(extractor, 'extract_lenient', None)
-        if callable(lenient_extract):
-            blocks = lenient_extract(filepath, asset_store)
-            blocks = strip_preamble(blocks)
-
-    if not any(b.type == 'heading' for b in blocks):
         tree = _build_fallback_tree(blocks, root_label=filename, doc_id=doc_id)
         return enrich_tree_display(tree, doc_id=doc_id)
 

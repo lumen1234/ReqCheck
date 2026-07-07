@@ -50,7 +50,7 @@ class MdExtractor:
                 continue
 
             if line.startswith('#'):
-                from app.parsers.heading_detector import parse_md_atx_heading
+                from app.parsers.heading_detector import parse_md_atx_heading, label_looks_like_requirement_content
                 parsed = parse_md_atx_heading(line)
                 if parsed:
                     number, label, level = parsed
@@ -61,9 +61,11 @@ class MdExtractor:
             numbered = parse_heading_line(line.lstrip('#').strip())
             if numbered:
                 number, label, level = numbered
-                blocks.append(make_heading_block(number, label, level, text=line))
-                i += 1
-                continue
+                if not label_looks_like_requirement_content(label):
+                    blocks.append(make_heading_block(number, label, level, text=line))
+                    i += 1
+                    continue
+                # 数字模式但内容像需求正文 → 降级为普通段落
 
             if line.startswith('|') and i + 1 < len(lines):
                 table_lines, next_i = _collect_md_table(lines, i)

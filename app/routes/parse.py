@@ -24,6 +24,9 @@ import os
 
 import json
 
+# 解析器版本号：代码逻辑变更后递增，使旧缓存自动失效
+_PARSER_VERSION = 2
+
 
 
 parse_bp = Blueprint('parse', __name__)
@@ -83,30 +86,21 @@ def save_cache_index(cache_index):
 
 
 def _prepare_tree_for_response(req_tree, doc_id: str, classify: bool = True):
-
     """补全 content_html / display_title / is_req，兼容旧缓存 JSON。"""
-
     if not req_tree:
-
         return req_tree
-
     enrich_tree_display(req_tree, doc_id)
-
     if classify and tree_needs_classification(req_tree):
-
         ensure_tree_classified(req_tree)
-
     return req_tree
-
-
-
-
 
 def save_json_to_file(doc_id, tree):
 
     output_filename = f"{doc_id}.json"
 
     output_path = os.path.join(_parse_output_folder(), output_filename)
+
+    tree['_parser_version'] = _PARSER_VERSION
 
     with open(output_path, 'w', encoding='utf-8') as f:
 
@@ -206,23 +200,27 @@ def parse_document(doc_id):
 
             req_tree = json.load(f)
 
-        needs_save = tree_needs_classification(req_tree)
+        # 解析器版本不匹配 → 缓存失效，强制重解析
+        if req_tree.get('_parser_version') != _PARSER_VERSION:
+            force = True
+        else:
+            needs_save = tree_needs_classification(req_tree)
 
-        req_tree = _prepare_tree_for_response(req_tree, doc_id)
+            req_tree = _prepare_tree_for_response(req_tree, doc_id)
 
-        if needs_save:
+            if needs_save:
 
-            save_json_to_file(doc_id, req_tree)
+                save_json_to_file(doc_id, req_tree)
 
-        return jsonify({
+            return jsonify({
 
-            'requirement_tree': req_tree,
+                'requirement_tree': req_tree,
 
-            'output_file': existing_json,
+                'output_file': existing_json,
 
-            'cached': True,
+                'cached': True,
 
-        })
+            })
 
 
 
@@ -264,23 +262,27 @@ def parse_document(doc_id):
 
                 req_tree = json.load(f)
 
-            req_tree['label'] = filename
+            # 解析器版本不匹配 → 缓存失效
+            if req_tree.get('_parser_version') != _PARSER_VERSION:
+                force = True
+            else:
+                req_tree['label'] = filename
 
-            req_tree = _prepare_tree_for_response(req_tree, doc_id)
+                req_tree = _prepare_tree_for_response(req_tree, doc_id)
 
-            output_path = _persist_parse_result(doc_id, document, req_tree, text_hash, cache_index)
+                output_path = _persist_parse_result(doc_id, document, req_tree, text_hash, cache_index)
 
-            return jsonify({
+                return jsonify({
 
-                'requirement_tree': req_tree,
+                    'requirement_tree': req_tree,
 
-                'output_file': output_path,
+                    'output_file': output_path,
 
-                'cached': True,
+                    'cached': True,
 
-                'cached_from': cached_doc_id,
+                    'cached_from': cached_doc_id,
 
-            })
+                })
 
 
 

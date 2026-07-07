@@ -13,7 +13,13 @@ from docx.oxml.ns import qn
 from app.parsers.asset_store import AssetStore
 from app.parsers.block_utils import make_heading_block, split_lines_heading_body
 from app.parsers.formula_utils import docx_cell_text, docx_paragraph_text
-from app.parsers.heading_detector import is_toc_line, looks_like_body_section_title, parse_heading_line
+from app.parsers.heading_detector import (
+    is_toc_line,
+    label_looks_like_requirement_content,
+    level_from_number,
+    looks_like_body_section_title,
+    parse_heading_line,
+)
 from app.parsers.models import DocumentBlock, TableData
 from app.parsers.section_registry import SectionContext, is_not_section_title
 
@@ -83,79 +89,6 @@ class DocxExtractor:
             i += 1
         return blocks
 
-    def extract_lenient(self, filepath: str, asset_store: AssetStore) -> List[DocumentBlock]:
-        """宽松提取模板文档。
-
-        标准解析要求先识别到「1 范围」等正文起点。模板文档常只有无编号标题或
-        占位段落，这里保留所有正文内容，并尽量用 Word 标题样式/短标题切分结构。
-        """
-        doc = Document(filepath)
-        body_items = list(_iter_block_items(doc))
-        blocks: List[DocumentBlock] = []
-
-        for item in body_items:
-            if isinstance(item, Paragraph):
-                blocks.extend(self._parse_lenient_paragraph(item, doc, asset_store))
-            elif isinstance(item, Table):
-                table = _table_to_data(item)
-                if table.headers or table.rows:
-                    blocks.append(DocumentBlock(type='table', table=table))
-                for row in item.rows:
-                    for cell in row.cells:
-                        for cell_para in cell.paragraphs:
-                            for image in _extract_inline_images(cell_para, doc, asset_store):
-                                blocks.append(DocumentBlock(type='image', image=image))
-        return blocks
-
-    def _parse_lenient_paragraph(
-        self,
-        paragraph: Paragraph,
-        doc: Document,
-        asset_store: AssetStore,
-    ) -> List[DocumentBlock]:
-        text = docx_paragraph_text(paragraph)
-        blocks: List[DocumentBlock] = []
-
-        for image in _extract_inline_images(paragraph, doc, asset_store):
-            blocks.append(DocumentBlock(type='image', image=image))
-
-        if not text or is_toc_line(text):
-            return blocks
-
-        style_name = ''
-        if paragraph.style and paragraph.style.name:
-            style_name = paragraph.style.name.lower()
-        if style_name in TOC_STYLES:
-            return blocks
-
-        if '\n' in text:
-            split_blocks = split_lines_heading_body(text)
-            if split_blocks and split_blocks[0].type == 'heading':
-                return blocks + split_blocks
-
-        numbered = parse_heading_line(text)
-        if numbered:
-            number, label, level = numbered
-            return blocks + [make_heading_block(number, label, level, text=text)]
-
-        outline_level = _paragraph_outline_level_from_style(style_name)
-        if outline_level:
-            return blocks + [make_heading_block(None, text, outline_level, text=text)]
-
-        if _is_template_requirement_start(text):
-            return blocks + [make_heading_block(None, text, 2, text=text)]
-
-        # 模板中的「需求来源:N/A」「安全性影响:N/A」等字段应作为当前需求内容，
-        # 否则会被短文本规则误判成一堆 level 1 标题。
-        if _is_template_metadata_field(text):
-            return blocks + [DocumentBlock(type='paragraph', text=text)]
-
-        if looks_like_body_section_title(text):
-            level = 1 if _is_lenient_top_title(text) else 2
-            return blocks + [make_heading_block(None, text, level, text=text)]
-
-        return blocks + [DocumentBlock(type='paragraph', text=text)]
-
     def _parse_paragraph(
         self,
         paragraph: Paragraph,
@@ -163,6 +96,7 @@ class DocxExtractor:
         asset_store: AssetStore,
         next_paragraph: Optional[Paragraph] = None,
     ) -> List[DocumentBlock]:
+        """统一的段落解析，适用于正式文档和模板文档。"""
         text = docx_paragraph_text(paragraph)
         blocks: List[DocumentBlock] = []
 
@@ -179,22 +113,53 @@ class DocxExtractor:
         if style_name in TOC_STYLES:
             return blocks
 
+        # XML 大纲级别（w:outlineLvl）— 国军标文档常用 Normal + 大纲级别定义章节
+        xml_outline_level = _paragraph_outline_level_from_xml(paragraph)
+        if xml_outline_level is not None:
+            self._mark_body_started(f'{xml_outline_level}', text)
+            return blocks + [make_heading_block(None, text, xml_outline_level, text=text)]
+
+        # 段落 XML 大纲级别（已在上面检查过，这里仅对无 outlineLvl 的段落做样式回退）
+        if not xml_outline_level:
+            outline_level = _paragraph_outline_level_from_style(style_name)
+            if outline_level:
+                self.body_started = True
+                return blocks + [make_heading_block(None, text, outline_level, text=text)]
+
         if '\n' in text:
+            is_first = True
             for sub in split_lines_heading_body(text):
                 if sub.type == 'heading' and sub.number:
-                    self._mark_body_started(sub.number, sub.label or '')
-                    self.section_ctx.sync_number(sub.number)
-                    if self.body_started or sub.number == '1':
-                        self.body_started = True
-                        blocks.append(sub)
+                    is_first = False
+                    # 验证：数字编号开头不一定是真标题
+                    if _validate_numbered_heading(paragraph, style_name, sub.label or '', next_paragraph):
+                        fmt_level = _determine_heading_level(paragraph, sub.number, style_name)
+                        if fmt_level:
+                            sub.level = fmt_level
+                        self._mark_body_started(sub.number, sub.label or '')
+                        self.section_ctx.sync_number(sub.number)
+                        if self.body_started or sub.number == '1':
+                            blocks.append(sub)
+                    elif self.body_started:
+                        # 验证不通过 → 数字编号只是内容，降级为正文段落
+                        blocks.append(DocumentBlock(type='paragraph', text=sub.text or ''))
                 elif self.body_started:
-                    blocks.extend(self._classify_block(sub, style_name, next_paragraph, raw_text=sub.text))
+                    if is_first:
+                        # 单行段落（首行无编号）→ 正常分类
+                        blocks.extend(self._classify_block(sub, style_name, next_paragraph, paragraph, raw_text=sub.text))
+                    else:
+                        # 多行拆分后的剩余行 → 直接作正文，不重新分类
+                        if sub.text and sub.text.strip():
+                            blocks.append(DocumentBlock(type='paragraph', text=sub.text))
+                is_first = False
+                # 正文未开始时的非标题换行段落：忽略（封面/修订记录等前置内容）
             return blocks
 
         blocks.extend(self._classify_block(
             DocumentBlock(type='paragraph', text=text),
             style_name,
             next_paragraph,
+            paragraph,
             raw_text=text,
         ))
         return blocks
@@ -204,28 +169,36 @@ class DocxExtractor:
         block: DocumentBlock,
         style_name: str,
         next_paragraph: Optional[Paragraph],
+        paragraph: Optional[Paragraph] = None,
         raw_text: Optional[str] = None,
     ) -> List[DocumentBlock]:
+        """统一的段落分类级联，同时适用于正式文档和模板文档。"""
         text = raw_text or block.text or ''
         text = text.strip()
         if not text:
             return []
 
+        # 非章节标题关键词 → 正文
         if is_not_section_title(text):
             if self.body_started:
                 return [DocumentBlock(type='paragraph', text=text)]
             return []
 
+        # 1) 带编号标题：仅在段落有 Word 格式信号时才从数字文本提取编号。
+        #    正文也常以数字开头（如 "3.2.1 描述了系统…"），
+        #    无格式的数字行不当作标题。
         numbered = parse_heading_line(text)
         if numbered:
-            number, label, level = numbered
-            if is_not_section_title(label):
-                numbered = None
-            else:
-                self._mark_body_started(number, label)
-                self.section_ctx.sync_number(number)
-                return [make_heading_block(number, label, level, text=text)]
+            number, label, _ = numbered  # 忽略文本推算的层级
+            if not is_not_section_title(label):
+                if _validate_numbered_heading(paragraph, style_name, label, next_paragraph):
+                    self._mark_body_started(number, label)
+                    self.section_ctx.sync_number(number)
+                    level = _determine_heading_level(paragraph, number, style_name)
+                    return [make_heading_block(number, label, level, text=text)]
+                # 验证不通过：数字开头但实质是正文，继续落入后续步骤
 
+        # 2) GJB 438C 标准章节名匹配（无编号/无样式时的回退）
         reg = self.section_ctx.resolve(text, HEADING_STYLES.get(style_name))
         if reg and reg[0]:
             number, label, level = reg
@@ -233,24 +206,162 @@ class DocxExtractor:
             self.section_ctx.sync_number(number)
             return [make_heading_block(number, label, level, text=text)]
 
+        # 3) Word 样式标题（Heading 1..6 / 标题 1..6）
         outline_level = _paragraph_outline_level_from_style(style_name)
-        if outline_level and self.body_started:
+        if outline_level:
+            self.body_started = True
             return [make_heading_block(None, text, outline_level, text=text)]
 
-        if not self.body_started:
+        # 4) 模板需求起始行（如「需求标识: REQ-001」）
+        if _is_template_requirement_start(text):
+            self.body_started = True
+            return [make_heading_block(None, text, 2, text=text)]
+
+        # 5) 模板元数据字段（如「需求来源: N/A」）→ 正文，不提升为标题
+        if _is_template_metadata_field(text):
+            if self.body_started:
+                return [DocumentBlock(type='paragraph', text=text)]
             return []
 
+        # 6) 启发式短文本标题
+        if looks_like_body_section_title(text):
+            if '：' not in text and ':' not in text and not text.startswith('$$'):
+                if _is_lenient_top_title(text):
+                    # 已知的顶级章节名（范围/需求/合格性规定等）→ 无条件接受
+                    self.body_started = True
+                    return [make_heading_block(None, text, 1, text=text)]
+                elif self.body_started and _next_paragraph_looks_like_body(next_paragraph):
+                    return [make_heading_block(None, text, 2, text=text)]
+
+        # 7) 正文段落（仅在正文开始后收集）
+        if not self.body_started:
+            return []
         return [DocumentBlock(type='paragraph', text=text)]
 
     def _mark_body_started(self, number: str, label: str) -> None:
+        """标记正文起点。封面/目录已被上游过滤，第一个到达的标题即为正文第一章。"""
         if self.body_started:
             return
-        if number == '1' or '范围' in (label or ''):
-            self.body_started = True
+        self.body_started = True
 
 
 def _paragraph_outline_level_from_style(style_name: str) -> Optional[int]:
     return HEADING_STYLES.get(style_name)
+
+
+def _paragraph_outline_level_from_xml(paragraph: Paragraph) -> Optional[int]:
+    """读取 Word 段落 XML 中的 w:outlineLvl 属性。
+
+    Word 允许将任意段落的大纲级别设为「正文文本」以外的值（1-9 级），
+    即使段落样式不是 Heading 1..6。这在国军标文档中很常见。
+
+    返回 parser 内部 level（即 outlineLvl + 1），或 None。
+    """
+    pPr = paragraph._element.find(qn('w:pPr'))
+    if pPr is None:
+        return None
+    ol = pPr.find(qn('w:outlineLvl'))
+    if ol is None:
+        return None
+    try:
+        outline_lvl = int(ol.get(qn('w:val')))
+        return outline_lvl + 1  # 0-based → 1-based
+    except (TypeError, ValueError):
+        return None
+
+
+def _paragraph_numbering_level_from_xml(paragraph: Paragraph) -> Optional[int]:
+    """读取 Word 段落自动编号的缩进级别（w:numPr/w:ilvl）。
+
+    Word 的自动编号（如 "3.2.1"）会在段落属性中记录列表层级，
+    ilvl 值从 0 开始，返回 parser 内部 level（ilvl + 1）。
+
+    这比从数字文本中点号数量推断层级更可靠，因为正文内容
+    也可能以数字开头。
+    """
+    pPr = paragraph._element.find(qn('w:pPr'))
+    if pPr is None:
+        return None
+    numPr = pPr.find(qn('w:numPr'))
+    if numPr is None:
+        return None
+    ilvl = numPr.find(qn('w:ilvl'))
+    if ilvl is None:
+        return None
+    try:
+        return int(ilvl.get(qn('w:val'))) + 1  # 0-based → 1-based
+    except (TypeError, ValueError):
+        return None
+
+
+
+def _paragraph_has_bold_formatting(paragraph: Paragraph) -> bool:
+    """检查段落任意 run 是否有加粗格式（<w:b/> 或 <w:b w:val='1'/>）。"""
+    for run in paragraph._element.findall(qn('w:r')):
+        rPr = run.find(qn('w:rPr'))
+        if rPr is None:
+            continue
+        b = rPr.find(qn('w:b'))
+        if b is None:
+            continue
+        val = b.get(qn('w:val'))
+        if val is None or val in ('1', 'true', 'on'):
+            return True
+    return False
+
+
+def _paragraph_font_size_pt(paragraph: Paragraph):
+    """读取段落首个 run 的字号，半磅转 pt（w:val='32' = 16pt）。无信息返回 None。"""
+    for run in paragraph._element.findall(qn('w:r')):
+        rPr = run.find(qn('w:rPr'))
+        if rPr is None:
+            continue
+        sz = rPr.find(qn('w:sz'))
+        if sz is not None:
+            try:
+                return int(sz.get(qn('w:val'))) / 2.0
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _paragraph_has_heading_font(paragraph: Paragraph) -> bool:
+    """检查段落字体格式是否像标题（加粗 / >=13pt 且加粗 / >=16pt）。"""
+    font_size = _paragraph_font_size_pt(paragraph)
+    is_bold = _paragraph_has_bold_formatting(paragraph)
+    if is_bold and font_size is not None and font_size >= 13:
+        return True
+    if is_bold:
+        return True
+    if font_size is not None and font_size >= 16:
+        return True
+    return False
+
+
+def _determine_heading_level(
+    paragraph: Optional[Paragraph],
+    number: str,
+    style_name: str = '',
+) -> int:
+    """综合多种信号确定标题层级，避免仅依赖数字文本中点号数量。
+
+    优先级：
+    1. Word 标题样式（Heading 1-6 / 标题 1-6）
+    2. Word 自动编号缩进级别（w:numPr/w:ilvl）
+    3. 从数字文本推算（兜底）
+    """
+    # 1) Word 样式
+    if style_name:
+        style_level = HEADING_STYLES.get(style_name)
+        if style_level:
+            return style_level
+    # 2) Word 自动编号缩进级别
+    if paragraph is not None:
+        num_level = _paragraph_numbering_level_from_xml(paragraph)
+        if num_level:
+            return num_level
+    # 3) 兜底：从数字文本推算
+    return level_from_number(number)
 
 
 def _is_template_requirement_start(text: str) -> bool:
@@ -268,6 +379,80 @@ def _is_lenient_top_title(text: str) -> bool:
     normalized = (text or '').strip().replace(' ', '').replace('\u3000', '')
     return normalized in _LENIENT_TOP_TITLES
 
+
+# \u2500\u2500\u2500 \u7f16\u53f7\u6807\u9898\u9a8c\u8bc1\uff1a\u6570\u5b57\u5f00\u5934\u4e0d\u7b49\u4e8e\u6807\u9898 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+def _has_word_heading_formatting(
+    paragraph: Optional[Paragraph],
+    style_name: str = '',
+) -> bool:
+    """检查段落是否有 Word 格式信号表明它是真正的标题。
+
+    信号包括：样式名、大纲级别、自动编号缩进、字体格式（加粗/大字号）。
+    不包括数字文本模式。
+    """
+    if style_name and style_name in HEADING_STYLES:
+        return True
+    if paragraph is not None:
+        if _paragraph_numbering_level_from_xml(paragraph) is not None:
+            return True
+        if _paragraph_outline_level_from_xml(paragraph) is not None:
+            return True
+        if _paragraph_has_heading_font(paragraph):
+            return True
+    return False
+
+
+def _next_paragraph_looks_like_body(next_paragraph: Optional[Paragraph]) -> bool:
+    """检查下一段是否像正文（而非标题），用于上下文判定。
+
+    如果当前行疑似标题但无格式信号，看下一段：
+    - 下一段是长文本/需求句式 → 像正文 → 当前更像标题
+    - 下一段也有标题特征 → 当前大概率也是正文
+    - 无下一段 → 保守返回 False
+    """
+    if next_paragraph is None:
+        return False
+    next_text = docx_paragraph_text(next_paragraph).strip()
+    if not next_text:
+        return False
+    # 下一段有 Word 标题格式 → 后继是标题，削弱当前是标题的可能性
+    next_style = (next_paragraph.style.name.lower()
+                  if next_paragraph.style and next_paragraph.style.name else '')
+    if _has_word_heading_formatting(next_paragraph, next_style):
+        return False
+    # 下一段是长文本（>50字）→ 像正文
+    if len(next_text) > 50:
+        return True
+    # 下一段包含需求关键词 → 像需求正文
+    if label_looks_like_requirement_content(next_text):
+        return True
+    # 下一段也像短标题 → 当前不像标题
+    if looks_like_body_section_title(next_text):
+        return False
+    return False
+
+
+def _validate_numbered_heading(
+    paragraph: Optional[Paragraph],
+    style_name: str,
+    label: str,
+    next_paragraph: Optional[Paragraph] = None,
+) -> bool:
+    """验证一个以数字编号开头的行是否为真正的标题。
+
+    需要满足以下任一条件：
+    1. 段落有 Word 格式信号（样式 / 自动编号 / 大纲级别 / 字体格式）
+    2. 标签文本像标题，且下一段像正文（无格式信号时必须）
+    """
+    if _has_word_heading_formatting(paragraph, style_name):
+        return True
+    if label_looks_like_requirement_content(label):
+        return False
+    # 无格式信号时，要求下一段像正文，否则倾向于拒绝
+    if next_paragraph is not None and not _next_paragraph_looks_like_body(next_paragraph):
+        return False
+    return True
 
 def _iter_block_items(parent):
     if isinstance(parent, DocumentType):

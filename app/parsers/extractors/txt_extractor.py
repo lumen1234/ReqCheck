@@ -6,6 +6,7 @@ from app.parsers.asset_store import AssetStore
 from app.parsers.heading_detector import (
     LIST_ITEM_RE,
     is_toc_line,
+    label_looks_like_requirement_content,
     parse_heading_line,
     parse_md_atx_heading,
 )
@@ -45,9 +46,11 @@ class TxtExtractor:
             numbered = parse_heading_line(line)
             if numbered and not LIST_ITEM_RE.match(line):
                 number, label, level = numbered
-                blocks.append(make_heading_block(number, label, level, text=line))
-                i += 1
-                continue
+                if not label_looks_like_requirement_content(label):
+                    blocks.append(make_heading_block(number, label, level, text=line))
+                    i += 1
+                    continue
+                # 数字模式但内容像需求正文 → 降级为普通段落
 
             if line.startswith('|') and i + 1 < len(lines):
                 table_lines, next_i = _collect_md_table(lines, i)
@@ -125,8 +128,12 @@ def _try_tab_table(lines: List[str], start: int):
         nxt = lines[i].rstrip('\n\r')
         if not nxt.strip():
             break
-        if parse_heading_line(nxt.strip()):
-            break
+        numbered = parse_heading_line(nxt.strip())
+        if numbered:
+            _, label, _ = numbered
+            if not label_looks_like_requirement_content(label):
+                break
+            # 数字模式但像需求内容 → 继续收集表格行
         if '\t' in nxt:
             collected.append([p.strip() for p in nxt.split('\t')])
         else:

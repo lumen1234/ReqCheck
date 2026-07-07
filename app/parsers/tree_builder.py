@@ -116,10 +116,14 @@ def build_requirement_tree(
 
             number = block.number
             label = normalize_heading_label(block.label or block.text or '')
-            if number:
+            # 优先使用提取器已确定的层级（来自 Word 样式/大纲级别/编号缩进），
+            # 仅在没有时才从数字文本推算，避免正文中以数字开头的内容被误判层级
+            if block.level:
+                level = block.level
+            elif number:
                 level = level_from_number(number)
             else:
-                level = block.level or 1
+                level = 1
 
             if _is_toc_label(label) or (block.text and is_toc_line(block.text)):
                 continue

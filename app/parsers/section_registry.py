@@ -1,4 +1,4 @@
-# GB/T 438C 软件需求规格说明 — 仅精确匹配，不做自动编号猜测
+# GJB 438C 软件需求规格说明 — 标准章节标题匹配（不包含文档特定的子节标题）
 from typing import Dict, List, Optional, Tuple
 
 CHAPTER_1: Dict[str, List[str]] = {
@@ -42,27 +42,9 @@ CHAPTER_2: Dict[str, List[Tuple[str, List[str]]]] = {
     ],
 }
 
-# 三级节（能力需求下的子节，按文档常见标题）
-CHAPTER_3: Dict[str, List[Tuple[str, List[str]]]] = {
-    '3.2': [
-        ('3.2.1', ['工作流程']),
-        ('3.2.2', ['配置项初始化']),
-        ('3.2.3', ['陀螺数据接收']),
-        ('3.2.4', ['数据处理']),
-        ('3.2.5', ['外部触发']),
-        ('3.2.6', ['自检']),
-        ('3.2.7', ['数据打包']),
-        ('3.2.8', ['数据发送']),
-        ('3.2.9', ['性能需求', '性能']),
-    ],
-}
-
 NOT_SECTION_KEYWORDS = (
     '一览表', '参考表', '追踪表', '见表', '数据帧',
 )
-
-# 3.2.x 等无编号小标题常见后缀（如「配置项初始化功能需求」）
-_SECTION_TITLE_SUFFIXES = ('功能需求', '需求', '功能', '特性')
 
 
 def is_not_section_title(text: str) -> bool:
@@ -71,6 +53,8 @@ def is_not_section_title(text: str) -> bool:
 
 
 class SectionContext:
+    """章节上下文：用于无编号/无样式标题时，按 GJB 438C 标准章节名匹配。"""
+
     def __init__(self):
         self.current_chapter: Optional[str] = None
         self.current_section: Optional[str] = None
@@ -85,6 +69,7 @@ class SectionContext:
                 self.current_section = None
 
     def resolve(self, text: str, style_level: Optional[int] = None) -> Optional[Tuple[str, str, int]]:
+        """返回 (编号, 短标签, 层级) 或 None。仅匹配 GJB 438C 标准的一/二级章节标题。"""
         label = text.strip()
         if not label or len(label) > 60 or is_not_section_title(label):
             return None
@@ -103,27 +88,15 @@ class SectionContext:
                     short = _pick_short_label(label, keys)
                     return sub_num, short, 2
 
-        if self.current_section and self.current_section in CHAPTER_3:
-            for sub_num, keys in CHAPTER_3[self.current_section]:
-                if _label_matches(label, keys, exact_only=True):
-                    short = _pick_short_label(label, keys)
-                    return sub_num, short, 3
-
         return None
 
 
-def _label_matches(label: str, keys: List[str], exact_only: bool = False) -> bool:
-    norm = label.replace(' ', '').replace('\u3000', '')
+def _label_matches(label: str, keys: List[str]) -> bool:
+    norm = label.replace(' ', '').replace('　', '')
     for k in keys:
         k = k.replace(' ', '')
         if norm == k:
             return True
-        if exact_only:
-            if norm.startswith(k):
-                rest = norm[len(k):]
-                if not rest or rest in _SECTION_TITLE_SUFFIXES:
-                    return True
-            continue
         if len(k) >= 3 and len(norm) <= len(k) + 4 and k in norm:
             return True
     return False

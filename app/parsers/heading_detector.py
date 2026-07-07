@@ -26,6 +26,27 @@ _INLINE_BODY_MARKERS = (
 )
 
 
+# 编号后的标签如果具备这些特征，大概率是需求正文，而不是真正标题。
+_REQUIREMENT_LABEL_STARTERS = (
+ '系统', '用户', '管理员', '平台', '页面', '接口', '服务', '模块', '软件',
+ '描述', '包括', '包含', '定义', '规定', '指明', '标识', '概述', '列出',
+ '提供', '支持', '满足', '实现', '采用', '使用', '根据', '按照', '通过',
+ '需要', '要求', '说明', '给出', '指出', '表示', '用于', '属于', '负责',
+ '进行', '建立', '确保', '保证', '执行', '显示', '展示', '校验', '保存',
+ '导出', '导入', '上传', '下载', '提示', '本条', '本章', '本节', '本文',
+ '该', '应', '可', '如', '需', '本', '其',
+)
+_REQUIREMENT_KEYWORDS_RE = re.compile(
+ r'(应当|应该|应|需要|支持|允许|可以|必须|不得|禁止|提供|实现|展示|显示'
+ r'|校验|保存|导出|导入|上传|下载|提示|记录|生成|发送|接收|处理|返回'
+ r'|配置|管理|创建|新增|编辑|删除|查询|查看|不超过|不小于|不大于|大于'
+ r'|小于|达到|具备|保障|兼容|遵循|符合|满足|响应|触发|调用|通知|存储'
+ r'|计算|统计|分析|检测|监控|恢复|验证|授权|认证|加载|刷新|切换|跳转)'
+)
+_REQUIREMENT_SUBJECT_RE = re.compile(r'^(系统|用户|管理员|平台|页面|接口|服务|模块|软件|客户端|服务器|数据库)')
+_CONDITION_SENTENCE_RE = re.compile(r'^(当|如果|若|在).*(时|则|需要|应|应该|必须|可以)')
+
+
 def is_toc_line(line: str) -> bool:
     """判断是否为 Word 自动目录行。"""
     line = line.strip()
@@ -72,8 +93,38 @@ def level_from_number(number: str) -> int:
     return len(parts) if parts else 1
 
 
+def label_looks_like_requirement_content(label: str) -> bool:
+ """判断编号后的标签文本是否更像需求正文，而不是短标题。"""
+ label = (label or '').strip()
+ if not label:
+	 return False
+ # 4-6 字短词（如「应急响应」「系统概述」）即使碰巧含关键词也大概率是真标题
+ if len(label) <= 6:
+	 return False
+ if len(label) >20:
+	 return True
+ if label.endswith(('。', '；', ';', '，', ',', '！', '!', '？', '?')):
+	 return True
+ if _CONDITION_SENTENCE_RE.match(label):
+	 return True
+ if _REQUIREMENT_SUBJECT_RE.match(label) and _REQUIREMENT_KEYWORDS_RE.search(label):
+	 return True
+ if _REQUIREMENT_KEYWORDS_RE.search(label) and len(label) >=8:
+	 return True
+ if any(label.startswith(starter) for starter in _REQUIREMENT_LABEL_STARTERS):
+	 # 仅以关键词开头是弱信号，需附加条件才判为需求内容
+	 if _REQUIREMENT_KEYWORDS_RE.search(label) or len(label) >= 10:
+	 	return True
+ return False
+
 def parse_heading_line(line: str) -> Optional[Tuple[str, str, int]]:
-    """解析带数字编号的标题行，返回 (number, label, level)。"""
+    """从匹配数字编号模式的行中提取 (number, label, level)。
+
+    IMPORTANT: 此函数仅负责结构提取，不做标题判定。
+    调用方必须结合 Word 格式信号或内容启发式来判定该行是否真的是标题。
+
+    返回 (number, label, level) 或 None。
+    """
     line = line.strip()
     if not line or LIST_ITEM_RE.match(line) or is_toc_line(line):
         return None
