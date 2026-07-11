@@ -3,7 +3,7 @@ version: "3.9"
 services:
   reqcheck:
     build: .
-    image: reqcheck
+    image: rc:v3
     container_name: reqcheck
     ports:
       - "8001:5000"

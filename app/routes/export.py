@@ -96,25 +96,38 @@ def export_requirements(doc_id):
 
 @export_bp.route('/api/export/batch/<batch_id>', methods=['GET'])
 def export_batch_requirements(batch_id):
+	portal_project_id = request.args.get('portal_project_id') or None
 	batch = DocumentBatch.query.filter_by(id=batch_id).first()
-	if not batch:
-		return jsonify({'error': 'Batch not found'}),404
-	documents = Document.query.filter_by(batch_id=batch_id).order_by(Document.batch_order.asc()).all()
-	if not documents:
+	doc_entries = []
+	batch_name = None
+	if batch:
+		batch_name = batch.name
+		for document in Document.query.filter_by(batch_id=batch_id).order_by(Document.batch_order.asc()).all():
+			doc_entries.append({'doc_id': document.id, 'filename': document.filename, 'batch_order': document.batch_order or 1})
+	else:
+		uniportal_batch = project_service.get_uniportal_batch_detail(batch_id, portal_project_id=portal_project_id)
+		if not uniportal_batch:
+			return jsonify({'error': 'Batch not found'}),404
+		batch_name = uniportal_batch.get('batch_name') or batch_id
+		for doc in uniportal_batch.get('documents') or []:
+			doc_entries.append({'doc_id': doc['doc_id'], 'filename': doc['filename'], 'batch_order': doc.get('doc') or 1})
+
+	if not doc_entries:
 		return jsonify({'error': 'Batch has no documents'}),404
+
 	requirements = []
 	counter =1
 	missing = []
-	for document in documents:
-		req_tree = _load_requirement_tree(document.id)
+	for document in doc_entries:
+		req_tree = _load_requirement_tree(document['doc_id'])
 		if not req_tree:
-			missing.append(document.filename)
+			missing.append(document['filename'])
 			continue
-		_ensure_classified_saved(document.id, req_tree)
-		flattened, counter = _flatten_tree(req_tree, _load_validation_map(document.id), doc_number=(document.batch_order or 1), counter_start=counter, node_id_prefix=f'{document.id}:')
+		_ensure_classified_saved(document['doc_id'], req_tree)
+		flattened, counter = _flatten_tree(req_tree, _load_validation_map(document['doc_id']), doc_number=document['batch_order'], counter_start=counter, node_id_prefix=f"{document['doc_id']}:")
 		for item in flattened:
-			item['doc_id'] = document.id
-			item['source_filename'] = document.filename
+			item['doc_id'] = document['doc_id']
+			item['source_filename'] = document['filename']
 		requirements.extend(flattened)
 	if not requirements:
 		return jsonify({'error': 'No parsed requirement trees found', 'missing': missing}),404
@@ -122,4 +135,7 @@ def export_batch_requirements(batch_id):
 	export_path = os.path.join(_export_output_folder(), export_filename)
 	with open(export_path, 'w', encoding='utf-8') as f:
 		json.dump(requirements, f, ensure_ascii=False, indent=2)
-	return jsonify({'batch_id': batch.id, 'batch_name': batch.name, 'export_file': export_filename, 'export_path': export_path, 'doc_count': len(documents), 'missing': missing, 'total_requirements': len(requirements), 'requirements': requirements})
+	uniportal_export_path = None
+	if not batch:
+		uniportal_export_path = project_service.sync_export_to_uniportal(batch_id, requirements, portal_project_id=portal_project_id)
+	return jsonify({'batch_id': batch_id, 'batch_name': batch_name, 'export_file': export_filename, 'export_path': export_path, 'doc_count': len(doc_entries), 'missing': missing, 'total_requirements': len(requirements), 'requirements': requirements, 'uniportal_export_path': uniportal_export_path, 'uniportal_export_synced': uniportal_export_path is not None})

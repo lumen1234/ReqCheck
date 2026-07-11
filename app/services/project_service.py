@@ -1,15 +1,24 @@
 """UniPortal 双数据源：共享卷读写（导出 JSON）+ 私有卷读写。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 from flask import current_app
 
-from app.services.uniportal_paths import export_dir_for_item, find_primary_document
+from app.services.uniportal_paths import (
+    export_dir_for_item,
+    find_all_documents,
+    find_primary_document,
+    pick_project_content_name,
+)
+
+# 多文档 item 的子文档 ID：{item_id}--{md5(relpath)[:12]}
+_SUBDOC_SEP = "--"
 
 
 @dataclass
@@ -22,6 +31,7 @@ class ProjectEntry:
     upload_time: Optional[str] = None
     file_type: Optional[str] = None
     file_path: Optional[str] = None
+    kind: Optional[str] = None  # "batch" | None
 
 
 @dataclass
@@ -31,10 +41,28 @@ class ResolvedDocument:
     filename: str
     source: str
     file_type: str = "other"
+    relative_path: Optional[str] = None
+    item_id: Optional[str] = None
+
+
+@dataclass
+class ItemDocumentEntry:
+    """共享卷 item 内的单个文档（用于虚拟 batch）。"""
+    doc_id: str
+    item_id: str
+    filename: str
+    relative_path: str
+    filepath: str
+    file_type: str
+    batch_order: int
 
 
 def _allowed_extensions() -> set[str]:
     return current_app.config.get("ALLOWED_EXTENSIONS", {"txt", "docx", "md", "markdown"})
+
+
+def _export_subdir() -> str:
+    return current_app.config.get("UNIPORTAL_EXPORT_SUBDIR", "document-validator")
 
 
 def uniportal_storage_path() -> Optional[str]:
@@ -52,6 +80,26 @@ def upload_folder() -> str:
     return current_app.config["UPLOAD_FOLDER"]
 
 
+def _relpath_key(item_dir: str, filepath: str) -> str:
+    return os.path.relpath(filepath, item_dir).replace("\\", "/")
+
+
+def make_subdoc_id(item_id: str, relative_path: str) -> str:
+    rel = relative_path.replace("\\", "/")
+    digest = hashlib.md5(rel.encode("utf-8")).hexdigest()[:12]
+    return f"{item_id}{_SUBDOC_SEP}{digest}"
+
+
+def parse_subdoc_id(doc_id: str) -> Optional[tuple[str, str]]:
+    """解析子文档 ID，返回 (item_id, path_digest) 或 None。"""
+    if _SUBDOC_SEP not in doc_id:
+        return None
+    item_id, digest = doc_id.rsplit(_SUBDOC_SEP, 1)
+    if not item_id or len(digest) != 12:
+        return None
+    return item_id, digest
+
+
 def is_uniportal_item(project_id: str) -> bool:
     """item 仅存在于共享卷（不在本地上传目录）。"""
     storage = uniportal_storage_path()
@@ -59,7 +107,8 @@ def is_uniportal_item(project_id: str) -> bool:
         return False
     if _local_upload_path(project_id):
         return False
-    return resolve_project_dir(project_id) is not None
+    item_id = parse_subdoc_id(project_id)[0] if parse_subdoc_id(project_id) else project_id
+    return resolve_project_dir(item_id) is not None
 
 
 def resolve_portal_project_id_for_item(
@@ -70,6 +119,10 @@ def resolve_portal_project_id_for_item(
     storage = uniportal_storage_path()
     if not storage:
         return None
+
+    parsed = parse_subdoc_id(item_id)
+    if parsed:
+        item_id = parsed[0]
 
     if portal_project_id:
         candidate = os.path.join(storage, portal_project_id, item_id)
@@ -91,6 +144,9 @@ def get_uniportal_export_dir(
     portal_project_id: Optional[str] = None,
 ) -> Optional[str]:
     """返回共享卷导出目录：挂在 item 根下，与 project_name 同级（如 {item_id}/document-validator/）。"""
+    parsed = parse_subdoc_id(item_id)
+    if parsed:
+        item_id = parsed[0]
     item_dir = resolve_project_dir(item_id, portal_project_id=portal_project_id)
     storage = uniportal_storage_path()
     if not item_dir or not storage:
@@ -99,8 +155,7 @@ def get_uniportal_export_dir(
     storage = os.path.normpath(storage)
     if not item_dir.startswith(storage):
         return None
-    subdir = current_app.config.get("UNIPORTAL_EXPORT_SUBDIR", "document-validator")
-    return export_dir_for_item(item_dir, subdir)
+    return export_dir_for_item(item_dir, _export_subdir())
 
 
 def uniportal_export_filename() -> str:
@@ -136,6 +191,10 @@ def resolve_project_dir(project_id: str, portal_project_id: Optional[str] = None
     2. 共享卷 /data/uniportal/{portal_project_id}/{project_id}（若指定工程 ID）
     3. 共享卷全工程扫描（未指定 portal_project_id 时，用于 item_id 全局定位）
     """
+    parsed = parse_subdoc_id(project_id)
+    if parsed:
+        project_id = parsed[0]
+
     local_item = os.path.join(local_workspaces_dir(), project_id)
     if os.path.isdir(local_item):
         return local_item
@@ -175,29 +234,112 @@ def _local_upload_path(project_id: str) -> Optional[str]:
 
 def _count_files(root: str) -> int:
     count = 0
-    for dirpath, _, filenames in os.walk(root):
+    skip = {_export_subdir(), "configuration-test-case-generate"}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
         for name in filenames:
             if not name.startswith("."):
                 count += 1
     return count
 
 
+def list_item_documents(
+    item_id: str,
+    portal_project_id: Optional[str] = None,
+) -> list[ItemDocumentEntry]:
+    """扫描共享卷 item 目录下全部支持的需求文档（跳过子工具输出目录）。"""
+    item_dir = resolve_project_dir(item_id, portal_project_id=portal_project_id)
+    if not item_dir:
+        return []
+
+    allowed = frozenset(_allowed_extensions())
+    docs = find_all_documents(item_dir, skip_subdir=_export_subdir(), allowed_extensions=allowed)
+    multi = len(docs) > 1
+    entries: list[ItemDocumentEntry] = []
+    for order, filepath in enumerate(docs, start=1):
+        rel = _relpath_key(item_dir, filepath)
+        filename = os.path.basename(filepath)
+        ext = os.path.splitext(filename)[1].lower().lstrip(".")
+        # 多文档用稳定子 ID；单文档仍用 item_id（兼容 UniPortal 深链）
+        doc_id = make_subdoc_id(item_id, rel) if multi else item_id
+        entries.append(
+            ItemDocumentEntry(
+                doc_id=doc_id,
+                item_id=item_id,
+                filename=filename,
+                relative_path=rel,
+                filepath=filepath,
+                file_type=ext or "other",
+                batch_order=order,
+            )
+        )
+    return entries
+
+
+def get_uniportal_batch_detail(
+    item_id: str,
+    portal_project_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """将共享卷 item 映射为与本地 batch 兼容的详情结构。"""
+    item_dir = resolve_project_dir(item_id, portal_project_id=portal_project_id)
+    if not item_dir:
+        return None
+
+    docs = list_item_documents(item_id, portal_project_id=portal_project_id)
+    if not docs:
+        return None
+
+    batch_name = _pick_display_name(item_dir, item_id)
+    mtime = datetime.fromtimestamp(os.path.getmtime(item_dir)).isoformat()
+    return {
+        "batch_id": item_id,
+        "doc_id": item_id,
+        "batch_name": batch_name,
+        "filename": batch_name,
+        "status": "available",
+        "upload_time": mtime,
+        "doc_count": len(docs),
+        "documents": [
+            {
+                "doc": d.batch_order,
+                "doc_id": d.doc_id,
+                "id": d.doc_id,
+                "filename": d.filename,
+                "relative_path": d.relative_path,
+                "file_type": d.file_type,
+                "status": "available",
+                "upload_time": mtime,
+                "source": "uniportal",
+                "file_path": d.filepath,
+            }
+            for d in docs
+        ],
+        "source": "uniportal",
+        "kind": "batch",
+        "file_path": item_dir,
+    }
+
+
 def _pick_display_name(item_dir: str, project_id: str) -> str:
-    doc = find_document_file(item_dir)
-    if doc:
-        return os.path.basename(doc)
+    folder_name = pick_project_content_name(item_dir, skip_subdir=_export_subdir())
+    if folder_name:
+        return folder_name
+    docs = list_item_documents(project_id)
+    if len(docs) == 1:
+        return docs[0].filename
+    if docs:
+        return docs[0].filename
     return project_id
 
 
 def find_document_file(root: str) -> Optional[str]:
     """在目录树中找第一个支持的文档文件，优先 docx > md > txt。"""
-    subdir = current_app.config.get("UNIPORTAL_EXPORT_SUBDIR", "document-validator")
     allowed = frozenset(_allowed_extensions())
-    return find_primary_document(root, skip_subdir=subdir, allowed_extensions=allowed)
+    return find_primary_document(root, skip_subdir=_export_subdir(), allowed_extensions=allowed)
 
 
 def resolve_document(project_id: str, portal_project_id: Optional[str] = None) -> Optional[ResolvedDocument]:
-    """先私有上传文件，再 UniPortal item 目录。"""
+    """先私有上传文件，再 UniPortal item 目录（支持多文档子 ID）。"""
     local_file = _local_upload_path(project_id)
     if local_file:
         filename = local_file.split(f"{project_id}_", 1)[-1] if f"{project_id}_" in os.path.basename(local_file) else os.path.basename(local_file)
@@ -210,22 +352,40 @@ def resolve_document(project_id: str, portal_project_id: Optional[str] = None) -
             file_type=ext or "other",
         )
 
+    sub = parse_subdoc_id(project_id)
+    if sub:
+        item_id, _digest = sub
+        for entry in list_item_documents(item_id, portal_project_id=portal_project_id):
+            if make_subdoc_id(item_id, entry.relative_path) == project_id:
+                return ResolvedDocument(
+                    project_id=project_id,
+                    filepath=entry.filepath,
+                    filename=entry.filename,
+                    source="uniportal",
+                    file_type=entry.file_type,
+                    relative_path=entry.relative_path,
+                    item_id=item_id,
+                )
+        return None
+
     item_dir = resolve_project_dir(project_id, portal_project_id=portal_project_id)
     if not item_dir:
         return None
 
-    doc_path = find_document_file(item_dir)
-    if not doc_path:
+    docs = list_item_documents(project_id, portal_project_id=portal_project_id)
+    if not docs:
         return None
 
-    filename = os.path.basename(doc_path)
-    ext = os.path.splitext(filename)[1].lower().lstrip(".")
+    # 单文档：直接用；多文档且用 item_id 访问时取第一篇（兼容旧深链）
+    entry = docs[0]
     return ResolvedDocument(
         project_id=project_id,
-        filepath=doc_path,
-        filename=filename,
+        filepath=entry.filepath,
+        filename=entry.filename,
         source="uniportal",
-        file_type=ext or "other",
+        file_type=entry.file_type,
+        relative_path=entry.relative_path,
+        item_id=project_id,
     )
 
 
@@ -243,17 +403,21 @@ def _scan_uniportal_items(portal_project_id: str) -> list[ProjectEntry]:
         item_dir = os.path.join(proj_path, item_id)
         if not os.path.isdir(item_dir):
             continue
+        docs = list_item_documents(item_id, portal_project_id=portal_project_id)
+        doc_count = len(docs)
         mtime = datetime.fromtimestamp(os.path.getmtime(item_dir)).isoformat()
+        is_batch = doc_count > 1
         items.append(
             ProjectEntry(
                 project_id=item_id,
                 project_name=_pick_display_name(item_dir, item_id),
-                file_count=_count_files(item_dir),
+                file_count=doc_count if doc_count else _count_files(item_dir),
                 status="available",
                 source="uniportal",
                 upload_time=mtime,
-                file_type="uniportal",
+                file_type="folder" if is_batch else "uniportal",
                 file_path=item_dir,
+                kind="batch" if is_batch else None,
             )
         )
     return items
@@ -291,7 +455,7 @@ def list_projects(portal_project_id: Optional[str] = None) -> list[ProjectEntry]
 
 
 def project_entry_to_dict(entry: ProjectEntry) -> dict:
-    return {
+    payload = {
         "id": entry.project_id,
         "doc_id": entry.project_id,
         "filename": entry.project_name,
@@ -303,3 +467,6 @@ def project_entry_to_dict(entry: ProjectEntry) -> dict:
         "file_type": entry.file_type,
         "file_path": entry.file_path,
     }
+    if entry.kind:
+        payload["kind"] = entry.kind
+    return payload

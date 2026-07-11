@@ -208,7 +208,7 @@ const folderTotalSize = computed(() => selectedFolderFiles.value.reduce((sum, fi
 const supportedExt = /\.(pdf|doc|docx|txt|md|markdown)$/i
 
 const formatSize = (size) => `${(size /1024).toFixed(2)} KB`
-const isBatchDoc = (doc) => doc.kind === 'batch' || doc.source === 'local_batch' || doc.file_type === 'folder'
+const isBatchDoc = (doc) => doc.kind === 'batch' || doc.source === 'local_batch' || doc.file_type === 'folder' || (doc.source === 'uniportal' && (doc.file_count || 0) > 1)
 const buildRouteQuery = (docName, extra = {}) => withPortalQuery({ docName, ...extra })
 
 const switchUploadMode = (mode) => {

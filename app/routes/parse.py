@@ -154,20 +154,32 @@ def parse_document(doc_id):
 
 @parse_bp.route('/api/parse/batch/<batch_id>', methods=['GET'])
 def parse_batch(batch_id):
-	batch = DocumentBatch.query.filter_by(id=batch_id).first()
-	if not batch:
-		return jsonify({'error': 'Batch not found'}),404
 	force = request.args.get('force', '').lower() in ('1', 'true', 'yes')
-	documents = DocModel.query.filter_by(batch_id=batch_id).order_by(DocModel.batch_order.asc()).all()
+	portal_project_id = request.args.get('portal_project_id') or None
+	batch = DocumentBatch.query.filter_by(id=batch_id).first()
+	doc_entries = []
+	batch_name = None
+	if batch:
+		batch_name = batch.name
+		for document in DocModel.query.filter_by(batch_id=batch_id).order_by(DocModel.batch_order.asc()).all():
+			doc_entries.append({'doc': document.batch_order, 'doc_id': document.id, 'filename': document.filename})
+	else:
+		uniportal_batch = project_service.get_uniportal_batch_detail(batch_id, portal_project_id=portal_project_id)
+		if not uniportal_batch:
+			return jsonify({'error': 'Batch not found'}),404
+		batch_name = uniportal_batch.get('batch_name') or batch_id
+		for doc in uniportal_batch.get('documents') or []:
+			doc_entries.append({'doc': doc.get('doc'), 'doc_id': doc['doc_id'], 'filename': doc['filename']})
+
 	results = []
 	errors = []
-	for document in documents:
+	for document in doc_entries:
 		try:
-			payload = parse_document_payload(document.id, force=force)
-			results.append({'doc': document.batch_order, 'doc_id': document.id, 'filename': document.filename, **payload})
+			payload = parse_document_payload(document['doc_id'], force=force, portal_project_id=portal_project_id)
+			results.append({**document, **payload})
 		except Exception as e:
-			errors.append({'doc': document.batch_order, 'doc_id': document.id, 'filename': document.filename, 'error': str(e)})
-	return jsonify({'batch_id': batch.id, 'batch_name': batch.name, 'doc_count': len(documents), 'parsed_count': len(results), 'failed_count': len(errors), 'documents': results, 'errors': errors})
+			errors.append({**document, 'error': str(e)})
+	return jsonify({'batch_id': batch_id, 'batch_name': batch_name, 'doc_count': len(doc_entries), 'parsed_count': len(results), 'failed_count': len(errors), 'documents': results, 'errors': errors})
 
 
 @parse_bp.route('/api/parse/<doc_id>/assets/<filename>', methods=['GET'])

@@ -158,10 +158,16 @@ def upload_folder():
 @upload_bp.route('/api/batches/<batch_id>', methods=['GET'])
 def get_batch(batch_id):
 	batch = DocumentBatch.query.filter_by(id=batch_id).first()
-	if not batch:
-		return jsonify({'error': 'Batch not found'}),404
-	documents = Document.query.filter_by(batch_id=batch_id).order_by(Document.batch_order.asc()).all()
-	return jsonify({'batch_id': batch.id, 'doc_id': batch.id, 'batch_name': batch.name, 'filename': batch.name, 'status': batch.status or '已上传', 'upload_time': batch.upload_time.isoformat() if batch.upload_time else None, 'doc_count': len(documents), 'documents': [_batch_document_to_dict(doc) for doc in documents], 'source': 'local_batch', 'kind': 'batch'})
+	if batch:
+		documents = Document.query.filter_by(batch_id=batch_id).order_by(Document.batch_order.asc()).all()
+		return jsonify({'batch_id': batch.id, 'doc_id': batch.id, 'batch_name': batch.name, 'filename': batch.name, 'status': batch.status or '已上传', 'upload_time': batch.upload_time.isoformat() if batch.upload_time else None, 'doc_count': len(documents), 'documents': [_batch_document_to_dict(doc) for doc in documents], 'source': 'local_batch', 'kind': 'batch'})
+
+	# UniPortal 共享卷项目文件夹：扫描 item 下全部支持文档
+	portal_project_id = request.args.get('portal_project_id') or None
+	uniportal_batch = project_service.get_uniportal_batch_detail(batch_id, portal_project_id=portal_project_id)
+	if uniportal_batch:
+		return jsonify(uniportal_batch)
+	return jsonify({'error': 'Batch not found'}),404
 
 
 def _remove_workspace_artifacts(doc_id, deleted_files, errors, *, include_batch_export=False):
