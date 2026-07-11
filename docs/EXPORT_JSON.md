@@ -18,7 +18,7 @@ ReqCheck（需求文档验证系统）在完成文档解析与规范验证后，
 
 - `{doc_id}` 为文档唯一标识（本地上传为哈希值；UniPortal 来源通常为 item UUID）
 - 默认落盘路径：`local_workspaces/export_results/export_{doc_id}.json`
-- UniPortal 共享卷同步路径（若已挂载）：`/data/uniportal/{portal_project_id}/{item_id}/_reqcheck/export_{doc_id}.json`
+- UniPortal 共享卷同步路径（若已挂载）：`/data/uniportal/{portal_project_id}/{item_id}/document-validator/requirement.json`
 
 ---
 

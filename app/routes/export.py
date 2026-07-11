@@ -1,13 +1,9 @@
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify
 from app import app
-from app.models import RequirementTree, ValidationResult
+from app.models import Document, DocumentBatch, RequirementTree, ValidationResult
 from app.services import project_service
 from app.services.req_classifier import ensure_tree_classified, tree_needs_classification
-from app.services.workspace import (
-    export_results_folder,
-    parse_results_folder,
-    validate_results_folder,
-)
+from app.services.workspace import export_results_folder, parse_results_folder, validate_results_folder
 import os
 import json
 
@@ -15,100 +11,115 @@ export_bp = Blueprint('export', __name__)
 
 
 def _export_output_folder():
-    return export_results_folder(app)
+	return export_results_folder(app)
+
+
+def _load_requirement_tree(doc_id):
+	parse_json_file = os.path.join(parse_results_folder(app), f'{doc_id}.json')
+	if os.path.exists(parse_json_file):
+		with open(parse_json_file, 'r', encoding='utf-8') as f:
+			return json.load(f)
+	requirement_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
+	return requirement_tree.tree_json if requirement_tree else None
+
+
+def _load_validation_map(doc_id):
+	validation_file = os.path.join(validate_results_folder(app), f'validation_{doc_id}.json')
+	if not os.path.exists(validation_file):
+		return {}
+	with open(validation_file, 'r', encoding='utf-8') as f:
+		validation_results = json.load(f)
+	return {vr.get('id'): vr for vr in validation_results or []}
+
+
+def _ensure_classified_saved(doc_id, req_tree):
+	if tree_needs_classification(req_tree):
+		ensure_tree_classified(req_tree)
+		parse_json_file = os.path.join(parse_results_folder(app), f'{doc_id}.json')
+		with open(parse_json_file, 'w', encoding='utf-8') as f:
+			json.dump(req_tree, f, ensure_ascii=False, indent=2)
+
+
+def _flatten_tree(req_tree, validation_map, doc_number=1, counter_start=1, node_id_prefix=''):
+	requirements = []
+	req_id_counter = counter_start
+
+	def traverse_tree(node, parent_id):
+		nonlocal req_id_counter
+		req_id = f"req{req_id_counter}"
+		req_id_counter +=1
+		raw_node_id = node.get('id', '')
+		node_id = f'{node_id_prefix}{raw_node_id}' if node_id_prefix else raw_node_id
+		validation = validation_map.get(raw_node_id, {})
+		requirement = {
+			'id': req_id,
+			'doc': doc_number,
+			'node_id': node_id,
+			'title': node.get('label', node.get('name', '')),
+			'content': node.get('content', ''),
+			'content_html': node.get('content_html', ''),
+			'tables': node.get('tables') or [],
+			'images': node.get('images') or [],
+			'level': node.get('level',0),
+			'parent_id': parent_id,
+			'is_req': node.get('is_req',0),
+			'validation_result': validation.get('result') if validation else None,
+			'validation_reason': validation.get('reason', '') if validation else '',
+		}
+		if node.get('is_req') ==1:
+			requirement['type'] = node.get('type', '')
+		requirements.append(requirement)
+		for child in node.get('children') or []:
+			traverse_tree(child, req_id)
+
+	traverse_tree(req_tree, 'root')
+	return requirements, req_id_counter
+
 
 @export_bp.route('/api/export/<doc_id>', methods=['GET'])
 def export_requirements(doc_id):
-    if not doc_id:
-        return jsonify({'error': 'doc_id is required'}), 400
-    
-    req_tree = None
-    
-    parse_json_file = os.path.join(parse_results_folder(app), f'{doc_id}.json')
-    
-    if os.path.exists(parse_json_file):
-        with open(parse_json_file, 'r', encoding='utf-8') as f:
-            req_tree = json.load(f)
-    
-    if not req_tree:
-        requirement_tree = RequirementTree.query.filter_by(doc_id=doc_id).first()
-        if not requirement_tree:
-            return jsonify({'error': 'Requirement tree not found'}), 404
-        req_tree = requirement_tree.tree_json
+	if not doc_id:
+		return jsonify({'error': 'doc_id is required'}),400
+	req_tree = _load_requirement_tree(doc_id)
+	if not req_tree:
+		return jsonify({'error': 'Requirement tree not found'}),404
+	_ensure_classified_saved(doc_id, req_tree)
+	requirements, _ = _flatten_tree(req_tree, _load_validation_map(doc_id), doc_number=1, counter_start=1)
+	export_filename = f'export_{doc_id}.json'
+	export_path = os.path.join(_export_output_folder(), export_filename)
+	with open(export_path, 'w', encoding='utf-8') as f:
+		json.dump(requirements, f, ensure_ascii=False, indent=2)
+	portal_project_id = request.args.get('portal_project_id') or None
+	uniportal_export_path = project_service.sync_export_to_uniportal(doc_id, requirements, portal_project_id=portal_project_id)
+	return jsonify({'export_file': export_filename, 'export_path': export_path, 'uniportal_export_path': uniportal_export_path, 'uniportal_export_synced': uniportal_export_path is not None, 'total_requirements': len(requirements), 'requirements': requirements})
 
-    if tree_needs_classification(req_tree):
-        ensure_tree_classified(req_tree)
-        parse_json_file = os.path.join(parse_results_folder(app), f'{doc_id}.json')
-        with open(parse_json_file, 'w', encoding='utf-8') as f:
-            json.dump(req_tree, f, ensure_ascii=False, indent=2)
-    
-    validation_results = None
-    validation_file = os.path.join(validate_results_folder(app), f'validation_{doc_id}.json')
-    
-    if os.path.exists(validation_file):
-        with open(validation_file, 'r', encoding='utf-8') as f:
-            validation_results = json.load(f)
-    
-    validation_map = {}
-    if validation_results:
-        for vr in validation_results:
-            validation_map[vr.get('id')] = vr
-    
-    requirements = []
-    req_id_counter = 1
-    
-    def traverse_tree(node, parent_id):
-        nonlocal req_id_counter
-        req_id = f"req{req_id_counter}"
-        req_id_counter += 1
-        
-        node_id = node.get('id', '')
-        
-        validation = validation_map.get(node_id, {})
-        
-        requirement = {
-            'id': req_id,
-            'node_id': node_id,
-            'title': node.get('label', node.get('name', '')),
-            'content': node.get('content', ''),
-            'content_html': node.get('content_html', ''),
-            'tables': node.get('tables') or [],
-            'images': node.get('images') or [],
-            'level': node.get('level', 0),
-            'parent_id': parent_id,
-            'is_req': node.get('is_req', 0),
-            'validation_result': validation.get('result') if validation else None,
-            'validation_reason': validation.get('reason', '') if validation else ''
-        }
-        if node.get('is_req') == 1:
-            requirement['type'] = node.get('type', '')
-        requirements.append(requirement)
-        
-        children = node.get('children') or []
-        for child in children:
-            traverse_tree(child, req_id)
-    
-    traverse_tree(req_tree, 'root')
-    
-    export_filename = f"export_{doc_id}.json"
-    export_path = os.path.join(_export_output_folder(), export_filename)
-    
-    with open(export_path, 'w', encoding='utf-8') as f:
-        json.dump(requirements, f, ensure_ascii=False, indent=2)
 
-    portal_project_id = request.args.get('portal_project_id') or None
-    uniportal_export_path = project_service.sync_export_to_uniportal(
-        doc_id,
-        requirements,
-        portal_project_id=portal_project_id,
-    )
-    
-    return jsonify({
-        'export_file': export_filename,
-        'export_path': export_path,
-        'uniportal_export_path': uniportal_export_path,
-        'uniportal_export_synced': uniportal_export_path is not None,
-        'total_requirements': len(requirements),
-        'requirements': requirements
-    })
-    
+@export_bp.route('/api/export/batch/<batch_id>', methods=['GET'])
+def export_batch_requirements(batch_id):
+	batch = DocumentBatch.query.filter_by(id=batch_id).first()
+	if not batch:
+		return jsonify({'error': 'Batch not found'}),404
+	documents = Document.query.filter_by(batch_id=batch_id).order_by(Document.batch_order.asc()).all()
+	if not documents:
+		return jsonify({'error': 'Batch has no documents'}),404
+	requirements = []
+	counter =1
+	missing = []
+	for document in documents:
+		req_tree = _load_requirement_tree(document.id)
+		if not req_tree:
+			missing.append(document.filename)
+			continue
+		_ensure_classified_saved(document.id, req_tree)
+		flattened, counter = _flatten_tree(req_tree, _load_validation_map(document.id), doc_number=(document.batch_order or 1), counter_start=counter, node_id_prefix=f'{document.id}:')
+		for item in flattened:
+			item['doc_id'] = document.id
+			item['source_filename'] = document.filename
+		requirements.extend(flattened)
+	if not requirements:
+		return jsonify({'error': 'No parsed requirement trees found', 'missing': missing}),404
+	export_filename = f'export_batch_{batch_id}.json'
+	export_path = os.path.join(_export_output_folder(), export_filename)
+	with open(export_path, 'w', encoding='utf-8') as f:
+		json.dump(requirements, f, ensure_ascii=False, indent=2)
+	return jsonify({'batch_id': batch.id, 'batch_name': batch.name, 'export_file': export_filename, 'export_path': export_path, 'doc_count': len(documents), 'missing': missing, 'total_requirements': len(requirements), 'requirements': requirements})

@@ -83,6 +83,7 @@ const steps = [
 // 从路由中获取状态信息
 const documentId = computed(() => route.params.documentId || null)
 const documentName = computed(() => route.query.docName || null)
+const isBatchMode = computed(() => route.query.mode === 'batch')
 
 // 当前步骤索引
 const currentStepIndex = computed(() => {
@@ -138,18 +139,17 @@ const getConnectorClass = (index) => {
 // 处理步骤点击
 const handleStepClick = (index, step) => {
   if (isDisabled(index)) return
-  
-  // 构建路由参数
+
   const routeConfig = { name: step.routeName }
-  
-  // 如果不是上传步骤，需要带上 documentId
+
   if (step.routeName !== 'upload' && documentId.value) {
     routeConfig.params = { documentId: documentId.value }
-    if (documentName.value) {
-      routeConfig.query = withPortalQuery({ docName: documentName.value })
-    }
+    routeConfig.query = withPortalQuery({
+      ...(documentName.value ? { docName: documentName.value } : {}),
+      ...(isBatchMode.value ? { mode: 'batch' } : {}),
+    })
   }
-  
+
   router.push(routeConfig)
 }
 </script>

@@ -9,7 +9,7 @@ services:
       - "8001:5000"
     volumes:
       # 与 UniPortal 共用 external 卷 uniportal_storage（须先启动 UniPortal 创建该卷）
-      # ReqCheck 需读写：导出 JSON 写入 {item_id}/document-validator/（其他子工具通常 :ro）
+      # ReqCheck 需读写：导出 JSON 写入 {portal}/{item_id}/document-validator/（与 project_name 同级）
       - uniportal_storage:/data/uniportal
       - reqcheck_local:/app/local_workspaces
       # 本地开发可改为绑定目录（与 Windows 代码目录同步）：

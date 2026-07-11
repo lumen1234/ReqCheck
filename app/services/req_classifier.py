@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from app import app
 from app.models import LLMConfig
 from app.routes.validate import call_deepseek_api, format_node_validation_content
+from app.services.llm_config import format_llm_request_error
 
 BATCH_SIZE = 10
 
@@ -248,7 +249,13 @@ def classify_requirement_tree(tree: Dict[str, Any]) -> Dict[str, Any]:
         print(f'  分类第 {batch_idx + 1}/{total_batches} 批 ({start + 1}-{end})...')
 
         prompt = _build_classification_prompt(batch_nodes)
-        response = call_deepseek_api(prompt, model, api_key, api_url)
+        try:
+            response = call_deepseek_api(prompt, model, api_key, api_url)
+        except Exception as e:
+            hint = format_llm_request_error(e, api_url)
+            raise RuntimeError(
+                f'需求分类失败：{hint} 请在右上角「模型设置」中配置有效的 API Key 后重试。'
+            ) from e
         batch_results = _parse_classification_response(response, batch_nodes)
         all_results.extend(batch_results)
 

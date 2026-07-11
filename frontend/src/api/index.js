@@ -139,4 +139,20 @@ export const testLLMConnection = () => {
   return apiClient.post('/config/llm/test')
 }
 
+
+export const uploadFolder = (formData) => {
+ return apiClient.post('/upload/folder', formData, {
+ headers: { 'Content-Type': 'multipart/form-data' }
+ })
+}
+
+export const getBatchDetail = (batchId) => {
+ return apiClient.get(`/batches/${batchId}`)
+}
+
+export const exportBatchRequirements = (batchId, portalProjectId = getPortalProjectId()) => {
+ const params = portalProjectId ? { portal_project_id: portalProjectId } : {}
+ return apiClient.get(`/export/batch/${batchId}`, { params })
+}
+
 export default apiClient

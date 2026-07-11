@@ -90,7 +90,7 @@ def get_uniportal_export_dir(
     item_id: str,
     portal_project_id: Optional[str] = None,
 ) -> Optional[str]:
-    """返回共享卷导出目录：与主文档同层（如 MEMS陀螺软件-new/document-validator/）。"""
+    """返回共享卷导出目录：挂在 item 根下，与 project_name 同级（如 {item_id}/document-validator/）。"""
     item_dir = resolve_project_dir(item_id, portal_project_id=portal_project_id)
     storage = uniportal_storage_path()
     if not item_dir or not storage:

@@ -227,7 +227,7 @@ def main() -> int:
         print("  共享卷路径已配置但目录不存在，请检查 docker volume 或 bind mount。")
         print("  docker volume ls | findstr uniportal")
     else:
-        print("  共享卷可读。导出将写入 {portal_project_id}/{item_id}/_reqcheck/")
+        print("  共享卷可读。导出将写入 {portal_project_id}/{item_id}/document-validator/")
         print("  用 --probe 确认写权限（compose 中勿加 :ro）。")
 
     print("=" * 60)

@@ -13,7 +13,7 @@ ReqCheck 容器
        ↓ 读写
 reqcheck_local 卷   (/app/local_workspaces/  解析/校验/导出缓存)
        ↓ 导出同步（ReqCheck 特例）
-uniportal_storage   (.../{item_id}/_reqcheck/export_{item_id}.json)
+uniportal_storage   (.../{item_id}/document-validator/requirement.json)
 ```
 
 ## 环境变量
@@ -22,7 +22,7 @@ uniportal_storage   (.../{item_id}/_reqcheck/export_{item_id}.json)
 |------|----------|--------|
 | `UNIPORTAL_STORAGE_PATH` | 未设置 | `/data/uniportal` |
 | `LOCAL_WORKSPACES_DIR` | `./local_workspaces` | `/app/local_workspaces` |
-| `UNIPORTAL_EXPORT_SUBDIR` | `_reqcheck` | `_reqcheck` |
+| `UNIPORTAL_EXPORT_SUBDIR` | `document-validator` | `document-validator` |
 
 ## 工程隔离行为
 
@@ -40,7 +40,7 @@ uniportal_storage   (.../{item_id}/_reqcheck/export_{item_id}.json)
 | 后端 | `app/services/project_service.py` | 双源解析、`list_projects(portal_project_id)` |
 | 后端 | `app/routes/upload.py` | `GET /api/documents?portal_project_id=` |
 | 后端 | `app/routes/parse.py` | `GET /api/parse/<item_id>?portal_project_id=` |
-| 后端 | `app/routes/export.py` | 导出 + 同步共享卷 `_reqcheck/` |
+| 后端 | `app/routes/export.py` | 导出 + 同步共享卷 `document-validator/` |
 | 前端 | `frontend/src/utils/portal.js` | URL → sessionStorage |
 | 前端 | `frontend/src/api/index.js` | GET 请求自动带 `portal_project_id` |
 | 前端 | `frontend/src/views/UploadView.vue` | 列表展示 `source: uniportal/local` |
@@ -81,7 +81,7 @@ http://<host>:5000/?portal_project_id=<工程UUID>#/documents/<item_id>/parse
 
 - `GET /api/documents?portal_project_id=<UUID>` — 工程 item 列表 + 本地上传（含 `source` 字段）
 - `GET /api/parse/<item_id>?portal_project_id=<UUID>` — 从共享卷读 docx 并解析
-- `GET /api/export/<item_id>?portal_project_id=<UUID>` — 导出并同步至 `_reqcheck/`
+- `GET /api/export/<item_id>?portal_project_id=<UUID>` — 导出并同步至 `document-validator/`
 - `DELETE /api/delete/<item_id>` — UniPortal 来源返回 403
 
 ## 本地独立开发
@@ -103,4 +103,4 @@ python scripts/check_uniportal_item.py --mock local_workspaces/_mock_uniportal -
 
 ## ReqCheck 与通用约定的差异
 
-通用子工具共享卷为 **只读**（`:ro`）。ReqCheck 需将 export JSON **写回** item 目录下的 `_reqcheck/`，因此 compose 中共享卷为 **读写**。中间产物（parse/validate/图片）仍只写私有卷。
+通用子工具共享卷为 **只读**（`:ro`）。ReqCheck 需将 export JSON **写回** item 目录下的 `document-validator/`（与 `project_name` 同级），因此 compose 中共享卷为 **读写**。中间产物（parse/validate/图片）仍只写私有卷。

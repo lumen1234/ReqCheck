@@ -1,141 +1,91 @@
 <template>
-  <div class="h-full flex flex-col bg-white">
-    <!-- Header -->
-    <div class="border-b border-slate-200 px-8 py-6">
-      <div class="max-w-7xl mx-auto flex items-center justify-between">
-        <div>
-          <h1 class="text-3xl font-bold text-slate-900">文档分析</h1>
-          <p class="text-slate-500 font-medium mt-2">解析文档并提取需求结构树</p>
-        </div>
-        <button
-          @click="loadRequirementTree(true)"
-          :disabled="loading"
-          class="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-all flex items-center gap-2"
-          title="重新解析文档"
-        >
-          <RotateCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />
-          刷新
-        </button>
-      </div>
-    </div>
+ <div class="h-full flex flex-col bg-white">
+ <div class="border-b border-slate-200 px-8 py-6">
+ <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+ <div>
+ <h1 class="text-3xl font-bold text-slate-900">文档分析</h1>
+ <p class="text-slate-500 font-medium mt-2">{{ isBatchMode ? '批量解析文件夹内文档，并通过文档转换器查看结果' : '解析文档并提取需求结构树' }}</p>
+ </div>
+ <button @click="refreshParse" :disabled="loading" class="px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-all flex items-center gap-2" title="重新解析文档">
+ <RotateCw class="w-4 h-4" :class="{ 'animate-spin': loading }" />
+ 刷新
+ </button>
+ </div>
+ <div v-if="isBatchMode" class="max-w-7xl mx-auto mt-3 space-y-2">
+ <div v-if="showParseProgress" class="bg-slate-50 border border-slate-200 rounded-md px-3 py-2 space-y-1.5">
+ <div class="flex items-center justify-between text-xs font-medium text-slate-600">
+ <span>正在解析：{{ parseProgress.current || '准备中' }}</span>
+ <span>{{ parseProgress.done }} / {{ parseProgress.total }}</span>
+ </div>
+ <div class="w-full bg-slate-200 rounded-full h-1.5">
+ <div class="bg-primary-600 h-1.5 rounded-full transition-all duration-300" :style="{ width: progressPercent + '%' }"></div>
+ </div>
+ </div>
+ <div v-if="!showParseProgress && parseProgress.errors.length" class="text-[11px] text-red-600 leading-snug">
+ 解析失败：{{ parseProgress.errors.map(e => e.filename).join('、') }}
+ </div>
+ <div class="flex flex-wrap items-center gap-1.5">
+ <span class="text-xs font-semibold text-slate-600 mr-0.5">文档转换器</span>
+ <button @click="setDocFilter('all')" :class="selectedDocFilter === 'all' ? 'bg-primary-900 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'" class="px-2 py-0.5 rounded text-xs font-medium transition-all">全部</button>
+ <button v-for="doc in batchDocuments" :key="doc.doc_id" @click="setDocFilter(doc.doc_id)" :class="selectedDocFilter === doc.doc_id ? 'bg-primary-900 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'" class="px-2 py-0.5 rounded text-xs font-medium transition-all max-w-[14rem] truncate" :title="doc.filename">
+ doc {{ doc.doc }}：{{ doc.filename }}
+ </button>
+ </div>
+ </div>
+ </div>
 
-    <!-- Main Content -->
-    <div class="flex-1 overflow-hidden flex">
-      <!-- Left: Tree View -->
-      <div class="w-1/3 border-r border-slate-200 overflow-y-auto p-6">
-        <RequirementTree 
-          :loading="loading"
-          :tree-data="treeData"
-          @node-click="handleNodeClick"
-          @load-mock-data="loadMockData"
-        />
-      </div>
-
-      <!-- Right: Detail View -->
-      <div class="flex-1 overflow-y-auto p-8">
-        <div v-if="selectedNode" :key="selectedNode.id" class="max-w-3xl space-y-6">
-          <!-- Node Header -->
-          <div class="space-y-2">
-            <div class="flex items-center space-x-2">
-              <span class="px-2 py-1 bg-primary-100 text-primary-900 text-xs font-semibold rounded">
-                Level {{ selectedNode.level }}
-              </span>
-            </div>
-            <h2 class="text-2xl font-bold text-slate-900">{{ selectedNode.label }}</h2>
-            <p class="text-xs text-slate-500 font-mono">ID: {{ selectedNode.id }}</p>
-          </div>
-
-          <!-- Node Content -->
-          <div v-if="hasNodeContent(selectedNode)" class="space-y-3">
-            <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wide">需求内容</h3>
-            <div class="bg-slate-50 border border-slate-200 rounded-lg p-6 space-y-4">
-              <!-- 图片优先展示（避免 buried 在表格后） -->
-              <div v-if="selectedNode.images && selectedNode.images.length" class="space-y-4">
-                <figure
-                  v-for="img in selectedNode.images"
-                  :key="img.id"
-                  class="text-center"
-                >
-                  <img
-                    :key="`${selectedNode.id}-${img.id}`"
-                    :src="`${img.path}?doc=${documentId}`"
-                    :alt="img.caption || img.alt || '图片'"
-                    class="max-w-full mx-auto border border-slate-200 rounded-lg bg-white min-h-[80px]"
-                    loading="eager"
-                    decoding="async"
-                    @error="onImageError($event, img)"
-                  />
-                  <figcaption v-if="img.caption || img.alt" class="text-xs text-slate-500 mt-2">
-                    {{ img.caption || img.alt }}
-                  </figcaption>
-                </figure>
-              </div>
-              <div
-                v-if="selectedNode.content_html"
-                ref="contentHtmlRef"
-                class="parse-content prose prose-sm max-w-none text-slate-700"
-                v-html="selectedNode.content_html"
-              />
-              <div v-else-if="selectedNode.tables && selectedNode.tables.length" class="space-y-4">
-                <div
-                  v-for="tbl in selectedNode.tables"
-                  :key="tbl.id || tbl.caption"
-                  class="overflow-x-auto"
-                  v-html="tableToHtml(tbl)"
-                />
-              </div>
-              <p
-                v-else-if="selectedNode.content"
-                class="text-slate-700 leading-relaxed whitespace-pre-wrap"
-              >{{ selectedNode.content }}</p>
-            </div>
-          </div>
-
-          <!-- Children Info -->
-          <div v-if="selectedNode.children && selectedNode.children.length > 0" class="space-y-3">
-            <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wide">子需求</h3>
-            <div class="grid grid-cols-2 gap-3">
-              <div 
-                v-for="child in selectedNode.children" 
-                :key="child.id"
-                @click="selectNode(child)"
-                class="p-4 bg-white border border-slate-200 rounded-lg hover:border-primary-400 hover:shadow-md transition-all cursor-pointer"
-              >
-                <p class="text-sm font-semibold text-slate-900 mb-1">{{ child.label }}</p>
-                <p class="text-xs text-slate-500">{{ child.id }}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-else class="flex items-center justify-center h-full text-slate-400">
-          <div class="text-center">
-            <FileText class="w-16 h-16 mx-auto mb-4 opacity-50" />
-            <p class="text-sm">请从左侧选择需求节点</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Bottom Action Bar -->
-    <div class="border-t border-slate-200 px-8 py-4 bg-slate-50">
-      <div class="max-w-7xl mx-auto flex justify-end">
-        <button 
-          @click="goToNext"
-          class="px-6 py-2.5 bg-primary-900 hover:bg-primary-800 text-white font-bold rounded-lg transition-all shadow-sm flex items-center space-x-2"
-        >
-          <span>进入需求验证</span>
-          <ChevronRight class="w-4 h-4" />
-        </button>
-      </div>
-    </div>
-  </div>
+ <div class="flex-1 overflow-hidden flex">
+ <div class="w-1/3 border-r border-slate-200 overflow-y-auto p-6">
+ <RequirementTree :loading="loading" :tree-data="treeData" @node-click="handleNodeClick" @load-mock-data="loadMockData" />
+ </div>
+ <div class="flex-1 overflow-y-auto p-8">
+ <div v-if="selectedNode" :key="selectedNode.id" class="max-w-3xl space-y-6">
+ <div class="space-y-2">
+ <div class="flex items-center space-x-2">
+ <span class="px-2 py-1 bg-primary-100 text-primary-900 text-xs font-semibold rounded">Level {{ selectedNode.level }}</span>
+ <span v-if="selectedNode.doc" class="px-2 py-1 bg-purple-100 text-purple-800 text-xs font-semibold rounded">doc {{ selectedNode.doc }}</span>
+ </div>
+ <h2 class="text-2xl font-bold text-slate-900">{{ selectedNode.label }}</h2>
+ <p class="text-xs text-slate-500 font-mono">ID: {{ selectedNode.id }}</p>
+ <p v-if="selectedNode.source_filename" class="text-xs text-slate-500">来源文档：{{ selectedNode.source_filename }}</p>
+ </div>
+ <div v-if="hasNodeContent(selectedNode)" class="space-y-3">
+ <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wide">需求内容</h3>
+ <div class="bg-slate-50 border border-slate-200 rounded-lg p-6 space-y-4">
+ <div v-if="selectedNode.images && selectedNode.images.length" class="space-y-4">
+ <figure v-for="img in selectedNode.images" :key="img.id" class="text-center">
+ <img :key="`${selectedNode.id}-${img.id}`" :src="`${img.path}?doc=${selectedNode.doc_id || documentId}`" :alt="img.caption || img.alt || '图片'" class="max-w-full mx-auto border border-slate-200 rounded-lg bg-white min-h-[80px]" loading="eager" decoding="async" @error="onImageError($event, img)" />
+ <figcaption v-if="img.caption || img.alt" class="text-xs text-slate-500 mt-2">{{ img.caption || img.alt }}</figcaption>
+ </figure>
+ </div>
+ <div v-if="selectedNode.content_html" ref="contentHtmlRef" class="parse-content prose prose-sm max-w-none text-slate-700" v-html="selectedNode.content_html" />
+ <div v-else-if="selectedNode.tables && selectedNode.tables.length" class="space-y-4"><div v-for="tbl in selectedNode.tables" :key="tbl.id || tbl.caption" class="overflow-x-auto" v-html="tableToHtml(tbl)" /></div>
+ <p v-else-if="selectedNode.content" class="text-slate-700 leading-relaxed whitespace-pre-wrap">{{ selectedNode.content }}</p>
+ </div>
+ </div>
+ <div v-if="selectedNode.children && selectedNode.children.length >0" class="space-y-3">
+ <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wide">子需求</h3>
+ <div class="grid grid-cols-2 gap-3"><div v-for="child in selectedNode.children" :key="child.id" @click="selectNode(child)" class="p-4 bg-white border border-slate-200 rounded-lg hover:border-primary-400 hover:shadow-md transition-all cursor-pointer"><p class="text-sm font-semibold text-slate-900 mb-1">{{ child.label }}</p><p class="text-xs text-slate-500">{{ child.id }}</p></div></div>
+ </div>
+ </div>
+ <div v-else class="flex items-center justify-center h-full text-slate-400"><div class="text-center"><FileText class="w-16 h-16 mx-auto mb-4 opacity-50" /><p class="text-sm">请从左侧选择需求节点</p></div></div>
+ </div>
+ </div>
+ <div class="border-t border-slate-200 px-8 py-4 bg-slate-50">
+ <div class="max-w-7xl mx-auto flex justify-end">
+ <button @click="goToNext" class="px-6 py-2.5 bg-primary-900 hover:bg-primary-800 text-white font-bold rounded-lg transition-all shadow-sm flex items-center space-x-2">
+ <span>进入需求验证</span>
+ <ChevronRight class="w-4 h-4" />
+ </button>
+ </div>
+ </div>
+ </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { getParseResult } from '../api'
+import { getParseResult, getBatchDetail } from '../api'
 import { FileText, ChevronRight, RotateCw } from 'lucide-vue-next'
 import RequirementTree from '../components/RequirementTree.vue'
 import { withPortalQuery } from '../utils/portal'
@@ -143,309 +93,118 @@ import { renderMathInElement } from '../utils/mathRender'
 
 const router = useRouter()
 const route = useRoute()
-
 const documentId = computed(() => route.params.documentId)
 const documentName = computed(() => route.query.docName || '未命名文档')
-
+const isBatchMode = computed(() => route.query.mode === 'batch')
 const loading = ref(false)
 const requirementTree = ref(null)
 const selectedNode = ref(null)
 const contentHtmlRef = ref(null)
-
-const renderNodeMath = () => {
-  nextTick(() => {
-    renderMathInElement(contentHtmlRef.value)
-  })
-}
-
-const transformNode = (node) => {
-  const transformed = {
-    id: node.id,
-    label: node.display_title || node.label || '未命名节点',
-    content: node.content ?? '',
-    content_html: node.content_html ?? '',
-    display_title: node.display_title,
-    number: node.number,
-    level: node.level || 1,
-    v_status: node.v_status ?? '',
-    e_status: node.e_status ?? '',
-    tables: node.tables,
-    images: node.images,
-    children: [],
-  }
-
-  if (node.children && Array.isArray(node.children) && node.children.length > 0) {
-    transformed.children = node.children.map((child) => transformNode(child))
-  }
-
-  return transformed
-}
-
-const convertToTreeData = (jsonData) => {
-  if (!jsonData || !Array.isArray(jsonData)) {
-    return []
-  }
-  return jsonData.map((node) => transformNode(node))
-}
-
-const pickFirstWithContent = (nodes) => {
-  for (const node of nodes || []) {
-    if (hasNodeContent(node)) {
-      return node
-    }
-    if (node.children?.length) {
-      const found = pickFirstWithContent(node.children)
-      if (found) return found
-    }
-  }
-  return nodes?.[0] ?? null
-}
-
-const hasNodeContent = (node) => {
-  if (!node) return false
-  return Boolean(
-    node.content ||
-    node.content_html ||
-    (node.images && node.images.length) ||
-    (node.tables && node.tables.length)
-  )
-}
-
-const escapeHtml = (text) => {
-  return String(text ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-const tableToHtml = (table) => {
-  const headers = table?.headers || []
-  const rows = table?.rows || []
-  if (!headers.length && !rows.length) return ''
-  let html = '<table class="req-table" border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">'
-  if (headers.length) {
-    html += '<thead><tr>'
-    headers.forEach((h) => {
-      html += `<th style="border:1px solid #ccc;padding:6px;background:#f5f5f5">${escapeHtml(h)}</th>`
-    })
-    html += '</tr></thead>'
-  }
-  if (rows.length) {
-    html += '<tbody>'
-    rows.forEach((row) => {
-      html += '<tr>'
-      row.forEach((cell) => {
-        html += `<td style="border:1px solid #ccc;padding:6px">${escapeHtml(cell)}</td>`
-      })
-      html += '</tr>'
-    })
-    html += '</tbody>'
-  }
-  html += '</table>'
-  return html
-}
-
-const treeData = computed(() => convertToTreeData(requirementTree.value))
-
-const selectNode = (node) => {
-  selectedNode.value = node ? { ...node } : null
-  renderNodeMath()
-}
-
-const handleNodeClick = (data) => {
-  selectNode(data)
-}
-
-const onImageError = (event, img) => {
-  console.warn('图片加载失败，请删除文档后重新上传或强制重新解析:', img?.path)
-  const el = event?.target
-  if (el) {
-    el.alt = '图片无法显示（请重新解析文档）'
-    el.classList.add('opacity-50')
-  }
-}
-
-const selectInitialNode = () => {
-  const first = pickFirstWithContent(treeData.value)
-  selectNode(first)
-}
-
-const loadMockData = () => {
-  requirementTree.value = [
-    {
-      id: 'req-1',
-      label: '1. 系统概述',
-      content: '本系统是一个文档审查工具，用于分析和审查软件需求文档。',
-      level: 1,
-      v_status: true,
-      e_status: 'pass',
-      children: [
-        {
-          id: 'req-1-1',
-          label: '1.1 系统目标',
-          content: '提供自动化的文档审查能力，提高文档质量。',
-          level: 2,
-          v_status: true,
-          e_status: 'pass',
-          children: [],
-        },
-        {
-          id: 'req-1-2',
-          label: '1.2 应用范围',
-          content: '适用于软件开发过程中的需求文档审查。',
-          level: 2,
-          v_status: true,
-          e_status: 'pending',
-          children: [],
-        },
-      ],
-    },
-    {
-      id: 'req-2',
-      label: '2. 功能需求',
-      content: '系统应提供以下功能模块。',
-      level: 1,
-      v_status: true,
-      e_status: 'pass',
-      children: [
-        {
-          id: 'req-2-1',
-          label: '2.1 文档上传',
-          content: '用户可以上传Word、PDF等格式的文档。',
-          level: 2,
-          v_status: true,
-          e_status: 'pass',
-          children: [
-            {
-              id: 'req-2-1-1',
-              label: '2.1.1 支持的格式',
-              content: '系统应支持.docx, .pdf, .txt格式的文档上传。',
-              level: 3,
-              v_status: true,
-              e_status: 'pass',
-              children: [],
-            },
-            {
-              id: 'req-2-1-2',
-              label: '2.1.2 文件大小限制',
-              content: '单个文件大小不超过50MB。',
-              level: 3,
-              v_status: false,
-              e_status: 'fail',
-              children: [],
-            },
-          ],
-        },
-        {
-          id: 'req-2-2',
-          label: '2.2 需求分析',
-          content: '系统自动解析文档并提取需求结构。',
-          level: 2,
-          v_status: true,
-          e_status: 'pending',
-          children: [],
-        },
-        {
-          id: 'req-2-3',
-          label: '2.3 需求补全',
-          content: '对缺失或不完整的需求进行分析和建议。',
-          level: 2,
-          v_status: false,
-          e_status: 'pending',
-          children: [],
-        },
-      ],
-    },
-    {
-      id: 'req-3',
-      label: '3. 非功能需求',
-      content: '系统的性能、安全等非功能性要求。',
-      level: 1,
-      v_status: true,
-      e_status: 'pass',
-      children: [
-        {
-          id: 'req-3-1',
-          label: '3.1 性能需求',
-          content: '系统响应时间应在3秒以内。',
-          level: 2,
-          v_status: true,
-          e_status: 'pass',
-          children: [],
-        },
-        {
-          id: 'req-3-2',
-          label: '3.2 安全需求',
-          content: '用户数据应加密存储和传输。',
-          level: 2,
-          v_status: true,
-          e_status: 'pass',
-          children: [],
-        },
-      ],
-    },
-  ]
-
-  selectInitialNode()
-}
-
-const goToNext = () => {
-  router.push({
-    name: 'validate',
-    params: { documentId: documentId.value },
-    query: withPortalQuery({ docName: documentName.value }),
-  })
-}
-
-const loadRequirementTree = async (force = false) => {
-  if (!documentId.value) return
-
-  loading.value = true
-  try {
-    const result = await getParseResult(documentId.value, { force })
-    requirementTree.value = result.requirement_tree.children || null
-    selectInitialNode()
-  } catch (error) {
-    console.error('Failed to load requirement tree:', error)
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(() => {
-  loadRequirementTree()
+const batchDocuments = ref([])
+const docTreesById = ref({})
+const selectedDocFilter = ref('all')
+const parseProgress = ref({ total:0, done:0, current: '', errors: [] })
+const progressPercent = computed(() => parseProgress.value.total ? Math.round(parseProgress.value.done / parseProgress.value.total *100) :0)
+const showParseProgress = computed(() => {
+ const { total, done } = parseProgress.value
+ return loading.value || (total > 0 && done < total)
 })
 
-watch(
-  () => selectedNode.value?.content_html,
-  () => renderNodeMath()
-)
+const renderNodeMath = () => nextTick(() => renderMathInElement(contentHtmlRef.value))
+const hasNodeContent = (node) => Boolean(node && (node.content || node.content_html || node.images?.length || node.tables?.length))
+const transformNode = (node, meta = {}) => {
+ const transformed = { id: node.id, label: node.display_title || node.label || '未命名节点', content: node.content ?? '', content_html: node.content_html ?? '', display_title: node.display_title, number: node.number, level: node.level ||1, v_status: node.v_status ?? '', e_status: node.e_status ?? '', tables: node.tables, images: node.images, doc: meta.doc ?? node.doc, doc_id: meta.doc_id ?? node.doc_id, source_filename: meta.filename ?? node.source_filename, children: [] }
+ transformed.children = (node.children || []).map((child) => transformNode(child, meta))
+ return transformed
+}
+const convertToTreeData = (jsonData, meta = {}) => Array.isArray(jsonData) ? jsonData.map((node) => transformNode(node, meta)) : []
+const combinedTreeData = computed(() => batchDocuments.value.map((doc) => ({ id: `doc-${doc.doc}`, label: `文档 ${doc.doc}：${doc.filename}`, level:1, doc: doc.doc, doc_id: doc.doc_id, source_filename: doc.filename, children: convertToTreeData(docTreesById.value[doc.doc_id]?.children || [], doc) })))
+const treeData = computed(() => {
+ if (!isBatchMode.value) return convertToTreeData(requirementTree.value)
+ if (selectedDocFilter.value === 'all') return combinedTreeData.value
+ const doc = batchDocuments.value.find((item) => item.doc_id === selectedDocFilter.value) || {}
+ return convertToTreeData(docTreesById.value[selectedDocFilter.value]?.children || [], doc)
+})
+const pickFirstWithContent = (nodes) => {
+ for (const node of nodes || []) {
+ if (hasNodeContent(node)) return node
+ const found = pickFirstWithContent(node.children)
+ if (found) return found
+ }
+ return nodes?.[0] ?? null
+}
+const selectNode = (node) => { selectedNode.value = node ? { ...node } : null; renderNodeMath() }
+const handleNodeClick = (data) => selectNode(data)
+const selectInitialNode = () => selectNode(pickFirstWithContent(treeData.value))
+const setDocFilter = (filter) => { selectedDocFilter.value = filter; nextTick(selectInitialNode) }
+const escapeHtml = (text) => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const tableToHtml = (table) => {
+ const headers = table?.headers || []
+ const rows = table?.rows || []
+ if (!headers.length && !rows.length) return ''
+ let html = '<table class="req-table" border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">'
+ if (headers.length) html += `<thead><tr>${headers.map((h) => `<th style="border:1px solid #ccc;padding:6px;background:#f5f5f5">${escapeHtml(h)}</th>`).join('')}</tr></thead>`
+ if (rows.length) html += `<tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td style="border:1px solid #ccc;padding:6px">${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody>`
+ return html + '</table>'
+}
+const onImageError = (event, img) => { console.warn('图片加载失败，请重新解析文档:', img?.path); event.target?.classList.add('opacity-50') }
+const loadRequirementTree = async (force = false) => {
+ if (!documentId.value) return
+ loading.value = true
+ try {
+ const result = await getParseResult(documentId.value, { force })
+ requirementTree.value = result.requirement_tree.children || null
+ selectInitialNode()
+ } catch (error) {
+ console.error('Failed to load requirement tree:', error)
+ const msg = error.response?.data?.error || error.message || '解析失败'
+ alert(msg)
+ } finally { loading.value = false }
+}
+const loadBatchRequirementTrees = async (force = false) => {
+ loading.value = true
+ docTreesById.value = {}
+ parseProgress.value = { total: batchDocuments.value.length, done:0, current: '', errors: [] }
+ for (const doc of batchDocuments.value) {
+ parseProgress.value.current = doc.filename
+ try {
+ const result = await getParseResult(doc.doc_id, { force })
+ docTreesById.value[doc.doc_id] = result.requirement_tree
+ } catch (error) {
+ const msg = error.response?.data?.error || error.message || '解析失败'
+ parseProgress.value.errors.push({ doc_id: doc.doc_id, filename: doc.filename, error: msg })
+ } finally { parseProgress.value.done +=1 }
+ }
+ if (parseProgress.value.errors.length) {
+ alert('部分文档解析失败：\n' + parseProgress.value.errors.map((e) => `${e.filename}: ${e.error}`).join('\n'))
+ }
+ selectedDocFilter.value = 'all'
+ selectInitialNode()
+ loading.value = false
+}
+const loadBatch = async (force = false) => {
+ if (!documentId.value) return
+ loading.value = true
+ try {
+ const result = await getBatchDetail(documentId.value)
+ batchDocuments.value = result.documents || []
+ } catch (error) { console.error('Failed to load batch:', error); loading.value = false; return }
+ await loadBatchRequirementTrees(force)
+}
+const refreshParse = () => isBatchMode.value ? loadBatch(true) : loadRequirementTree(true)
+const goToNext = () => {
+ if (isBatchMode.value) router.push({ name: 'validate', params: { documentId: documentId.value }, query: withPortalQuery({ docName: documentName.value, mode: 'batch' }) })
+ else router.push({ name: 'validate', params: { documentId: documentId.value }, query: withPortalQuery({ docName: documentName.value }) })
+}
+const loadMockData = () => { requirementTree.value = [{ id: 'req-1', label: '示例需求', content: '示例内容', level:1, children: [] }]; selectInitialNode() }
+onMounted(() => { isBatchMode.value ? loadBatch() : loadRequirementTree() })
+watch(() => selectedNode.value?.content_html, () => renderNodeMath())
 </script>
 
 <style scoped>
-.parse-content :deep(.req-table) {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 12px 0;
-  display: table;
-}
-.parse-content :deep(.req-table th),
-.parse-content :deep(.req-table td) {
-  border: 1px solid #ccc;
-  padding: 6px;
-  vertical-align: top;
-}
-.parse-content :deep(.req-table th) {
-  background: #f5f5f5;
-}
-.parse-content :deep(.math-block) {
-  margin: 12px 0;
-  overflow-x: auto;
-  text-align: center;
-}
-.parse-content :deep(.math-inline) {
-  display: inline-block;
-  vertical-align: middle;
-}
+.parse-content :deep(.req-table) { width:100%; border-collapse: collapse; margin:12px0; display: table; }
+.parse-content :deep(.req-table th), .parse-content :deep(.req-table td) { border:1px solid #ccc; padding:6px; vertical-align: top; }
+.parse-content :deep(.req-table th) { background: #f5f5f5; }
+.parse-content :deep(.math-block) { margin:12px0; overflow-x: auto; text-align: center; }
+.parse-content :deep(.math-inline) { display: inline-block; vertical-align: middle; }
 </style>

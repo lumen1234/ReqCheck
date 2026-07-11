@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""创建本地虚拟 UniPortal 共享卷并测试导出路径（含 MEMS 嵌套结构）。
+"""创建本地虚拟 UniPortal 共享卷并测试导出路径。
+
+目标层级：
+  {portal_project_id}/{project_id}/
+    ├── {project_name}/src/...
+    ├── configuration-test-case-generate/
+    └── document-validator/requirement.json
 
 用法:
   python scripts/setup_mock_shared_volume.py
@@ -8,8 +14,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
 from pathlib import Path
 
@@ -27,19 +31,22 @@ PORTAL_ID = "demo-portal-uuid"
 ITEM_ID = "demo-item-uuid"
 CONTENT_DIR = "MEMS陀螺软件-new"
 DOC_NAME = "MEMS陀螺软件需求规格说明_新.docx"
+OTHER_TOOL_DIR = "configuration-test-case-generate"
 
 
 def create_mock_tree(storage: Path) -> dict:
-    """模拟：{portal}/{item}/{MEMS陀螺软件-new}/docx"""
+    """模拟：{portal}/{item}/{project_name}/docx，导出应落在 item 根下。"""
     item_dir = storage / PORTAL_ID / ITEM_ID
     content_dir = item_dir / CONTENT_DIR
-    content_dir.mkdir(parents=True, exist_ok=True)
+    src_dir = content_dir / "src"
+    other_tool = item_dir / OTHER_TOOL_DIR
+    src_dir.mkdir(parents=True, exist_ok=True)
+    other_tool.mkdir(parents=True, exist_ok=True)
 
     doc = content_dir / DOC_NAME
     if not doc.exists():
         doc.write_bytes(b"PK mock docx")
 
-    # 故意不在 item 根放 document-validator，用于验证导出会进 content_dir
     return {
         "storage": str(storage.resolve()),
         "item_dir": str(item_dir.resolve()),
@@ -60,20 +67,24 @@ def run_export_test(storage: str) -> dict:
             portal_project_id=PORTAL_ID,
         )
 
-    expected_dir = export_dir_for_item(
-        str(Path(storage) / PORTAL_ID / ITEM_ID),
-        config.UNIPORTAL_EXPORT_SUBDIR,
-    )
+    item_dir = Path(storage) / PORTAL_ID / ITEM_ID
+    expected_dir = export_dir_for_item(str(item_dir), config.UNIPORTAL_EXPORT_SUBDIR)
     expected_file = str(Path(expected_dir) / config.UNIPORTAL_EXPORT_FILENAME)
 
     ok = export_path == expected_file and Path(export_path).is_file()
+    # 导出必须在 item 根下，不能嵌进 project_name
+    at_item_root = (
+        export_dir is not None
+        and Path(export_dir).parent == item_dir.resolve()
+        and CONTENT_DIR not in Path(export_dir).parts
+    )
     return {
         "export_dir": export_dir,
         "export_path": export_path,
         "expected_dir": expected_dir,
         "expected_file": expected_file,
-        "ok": ok,
-        "content_inside_mems": CONTENT_DIR in (export_dir or ""),
+        "ok": ok and at_item_root,
+        "at_item_root": at_item_root,
     }
 
 
@@ -102,14 +113,16 @@ def main() -> int:
     print(f"  {PORTAL_ID}/")
     print(f"    {ITEM_ID}/")
     print(f"      {CONTENT_DIR}/")
+    print(f"        src/")
     print(f"        {DOC_NAME}")
-    print(f"        document-validator/")
-    print(f"          {config.UNIPORTAL_EXPORT_FILENAME}")
+    print(f"      {OTHER_TOOL_DIR}/")
+    print(f"      document-validator/")
+    print(f"        {config.UNIPORTAL_EXPORT_FILENAME}")
     print()
     print("导出测试结果:")
     print(f"  导出目录     : {result['export_dir']}")
     print(f"  导出文件     : {result['export_path']}")
-    print(f"  在 MEMS 子目录内: {'是' if result['content_inside_mems'] else '否'}")
+    print(f"  在 item 根下 : {'是' if result['at_item_root'] else '否'}")
     print(f"  测试         : {'PASS' if result['ok'] else 'FAIL'}")
     print("=" * 60)
     print()

@@ -32,9 +32,11 @@
 /data/uniportal/
 └── {portal_project_id}/      ← UniPortal 测试项目 UUID
     └── {item_id}/            ← 软件条目 UUID  ← 用这个作为子工具的 project_id
-        └── {解压后源码根目录}/
-            ├── src/
-            └── ...
+        ├── {project_name}/   ← 解压后源码/文档根目录
+        │   └── src/
+        ├── configuration-test-case-generate/   ← 其他子工具输出
+        └── document-validator/                 ← ReqCheck 导出
+            └── requirement.json
 ```
 
 ### 2.3 私有卷目录结构（读写，原有结构不变）

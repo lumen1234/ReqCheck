@@ -1,4 +1,4 @@
-"""UniPortal 共享卷路径：document-validator 与主文档同层。"""
+"""UniPortal 共享卷路径：document-validator 与 project_name 同级（挂在 item 根下）。"""
 from __future__ import annotations
 
 import os
@@ -40,12 +40,6 @@ def find_primary_document(
     return found[0][1]
 
 
-def export_parent_dir(item_dir: str, export_subdir: str = "document-validator") -> str:
-    doc_path = find_primary_document(item_dir, skip_subdir=export_subdir)
-    if doc_path:
-        return os.path.dirname(doc_path)
-    return item_dir
-
-
 def export_dir_for_item(item_dir: str, export_subdir: str = "document-validator") -> str:
-    return os.path.join(export_parent_dir(item_dir, export_subdir), export_subdir)
+    """返回 {item_dir}/{export_subdir}，与 project_name / configuration-test-case-generate 同级。"""
+    return os.path.join(item_dir, export_subdir)

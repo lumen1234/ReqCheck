@@ -61,7 +61,7 @@ Flask 后端 (Python 3.10)
 ### 2.4 UniPortal 集成
 
 - **共享卷只读/读写**：读取门户上传的项目文档  
-- **导出路径**：`{portal_project_id}/{item_id}/<主文档同目录>/document-validator/requirement.json`  
+- **导出路径**：`{portal_project_id}/{item_id}/document-validator/requirement.json`（与 `project_name` 同级）  
 - **工程隔离**：URL 携带 `portal_project_id`，仅展示当前工程下的项目  
 
 ### 2.5 部署方式
@@ -166,7 +166,7 @@ http://<host>:8001/?portal_project_id=<工程UUID>
 3. 若已接入 UniPortal，导出同时写入共享卷：  
 
 ```
-.../<item_id>/<主文档目录>/document-validator/requirement.json
+.../<item_id>/document-validator/requirement.json
 ```
 
 4. 可点击「开始新分析」返回上传页处理下一文档  
@@ -220,7 +220,7 @@ http://<host>:8001/?portal_project_id=<工程UUID>
 | 公式不显示 | 重新解析；Word 内置公式支持较好，MathType 暂不支持 |
 | 验证一直 loading | 检查 LLM API 配置（设置页 / 环境变量） |
 | 导出未写入共享卷 | 确认 `UNIPORTAL_STORAGE_PATH` 已配置且 item 在共享卷中存在 |
-| 导出目录层级不对 | 使用最新版本；导出目录与主文档同层，见 `check_uniportal_item.py` |
+| 导出目录层级不对 | 使用最新版本；导出应在 `{item_id}/document-validator/`，与 `project_name` 同级 |
 
 ---
 

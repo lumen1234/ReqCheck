@@ -55,6 +55,7 @@
             </div>
             <h2 class="text-2xl font-bold text-slate-900">{{ selectedNode.label }}</h2>
             <p class="text-xs text-slate-500 font-mono">ID: {{ selectedNode.id }}</p>
+ <p v-if="selectedNode.source_filename" class="text-xs text-slate-500">来源文档：{{ selectedNode.source_filename }}</p>
           </div>
 
           <!-- Node Content -->
@@ -69,7 +70,7 @@
                 >
                   <img
                     :key="`${selectedNode.id}-${img.id}`"
-                    :src="`${img.path}?doc=${documentId}`"
+                    :src="`${img.path}?doc=${selectedNode.doc_id || documentId}`"
                     :alt="img.caption || img.alt || '图片'"
                     class="max-w-full mx-auto border border-slate-200 rounded-lg bg-white min-h-[80px]"
                     loading="eager"
@@ -174,7 +175,7 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { exportRequirements } from '../api'
+import { exportRequirements, exportBatchRequirements } from '../api'
 import { Download, RotateCw, FileText } from 'lucide-vue-next'
 import RequirementTree from '../components/RequirementTree.vue'
 import { renderMathInElement } from '../utils/mathRender'
@@ -184,6 +185,7 @@ const route = useRoute()
 
 // 从 URL 获取参数
 const documentId = computed(() => route.params.documentId)
+const isBatchMode = computed(() => route.query.mode === 'batch')
 
 const loading = ref(false)
 const flatRequirements = ref([])
@@ -377,7 +379,7 @@ const exportJSON = () => {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `requirements-${documentId.value || 'export'}.json`
+ a.download = isBatchMode.value ? `requirements-batch-${documentId.value || 'export'}.json` : `requirements-${documentId.value || 'export'}.json`
     a.click()
     window.URL.revokeObjectURL(url)
   } catch (error) {
@@ -400,7 +402,7 @@ const loadRequirements = async () => {
   
   loading.value = true
   try {
-    const result = await exportRequirements(documentId.value)
+    const result = isBatchMode.value ? await exportBatchRequirements(documentId.value) : await exportRequirements(documentId.value)
     flatRequirements.value = result.requirements || []
     
     // 自动选择第一个根节点
