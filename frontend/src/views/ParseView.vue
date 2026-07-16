@@ -35,8 +35,17 @@
  </div>
 
  <div class="flex-1 overflow-hidden flex">
- <div class="w-1/3 border-r border-slate-200 overflow-y-auto p-6">
+ <div class="w-1/3 border-r border-slate-200 overflow-y-auto flex flex-col">
+ <div class="px-6 pt-4 pb-2 border-b border-slate-100">
+ <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">内容分块关键词</label>
+ <div class="flex gap-2">
+ <input v-model="splitKeyword" type="text" placeholder="输入分块关键词..." class="flex-1 px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500" @keyup.enter="applySplit" />
+ <button @click="applySplit" class="px-3 py-1.5 text-sm font-semibold bg-primary-900 hover:bg-primary-800 text-white rounded-lg transition-all">应用</button>
+ </div>
+ </div>
+ <div class="flex-1 overflow-y-auto p-6">
  <RequirementTree :loading="loading" :tree-data="treeData" @node-click="handleNodeClick" @load-mock-data="loadMockData" />
+ </div>
  </div>
  <div class="flex-1 overflow-y-auto p-8">
  <div v-if="selectedNode" :key="selectedNode.id" class="max-w-3xl space-y-6">
@@ -59,8 +68,8 @@
  </figure>
  </div>
  <div v-if="selectedNode.content_html" ref="contentHtmlRef" class="parse-content prose prose-sm max-w-none text-slate-700" v-html="selectedNode.content_html" />
- <div v-else-if="selectedNode.tables && selectedNode.tables.length" class="space-y-4"><div v-for="tbl in selectedNode.tables" :key="tbl.id || tbl.caption" class="overflow-x-auto" v-html="tableToHtml(tbl)" /></div>
- <p v-else-if="selectedNode.content" class="text-slate-700 leading-relaxed whitespace-pre-wrap">{{ selectedNode.content }}</p>
+ <div v-if="selectedNode.tables && selectedNode.tables.length" class="space-y-4"><div v-for="tbl in selectedNode.tables" :key="tbl.id || tbl.caption" class="overflow-x-auto" v-html="tableToHtml(tbl)" /></div>
+ <p v-if="!selectedNode.content_html && selectedNode.content && !(selectedNode.content_blocks && selectedNode.content_blocks.length)" class="text-slate-700 leading-relaxed whitespace-pre-wrap">{{ selectedNode.content }}</p>
  </div>
  </div>
  <div v-if="selectedNode.children && selectedNode.children.length >0" class="space-y-3">
@@ -99,6 +108,12 @@ const isBatchMode = computed(() => route.query.mode === 'batch')
 const loading = ref(false)
 const requirementTree = ref(null)
 const selectedNode = ref(null)
+const splitKeyword = ref('需求标识')
+const activeSplitBy = ref('需求标识')
+const applySplit = () => {
+  activeSplitBy.value = splitKeyword.value.trim()
+  isBatchMode.value ? loadBatch(true) : loadRequirementTree(true)
+}
 const contentHtmlRef = ref(null)
 const batchDocuments = ref([])
 const docTreesById = ref({})
@@ -113,7 +128,7 @@ const showParseProgress = computed(() => {
 const renderNodeMath = () => nextTick(() => renderMathInElement(contentHtmlRef.value))
 const hasNodeContent = (node) => Boolean(node && (node.content || node.content_html || node.images?.length || node.tables?.length))
 const transformNode = (node, meta = {}) => {
- const transformed = { id: node.id, label: node.display_title || node.label || '未命名节点', content: node.content ?? '', content_html: node.content_html ?? '', display_title: node.display_title, number: node.number, level: node.level ||1, v_status: node.v_status ?? '', e_status: node.e_status ?? '', tables: node.tables, images: node.images, doc: meta.doc ?? node.doc, doc_id: meta.doc_id ?? node.doc_id, source_filename: meta.filename ?? node.source_filename, children: [] }
+ const transformed = { id: node.id, label: node.display_title || node.label || '未命名节点', content: node.content ?? '', content_html: node.content_html ?? '', display_title: node.display_title, number: node.number, level: node.level ||1, v_status: node.v_status ?? '', e_status: node.e_status ?? '', tables: node.tables, images: node.images, content_blocks: node.content_blocks || [], doc: meta.doc ?? node.doc, doc_id: meta.doc_id ?? node.doc_id, source_filename: meta.filename ?? node.source_filename, children: [] }
  transformed.children = (node.children || []).map((child) => transformNode(child, meta))
  return transformed
 }
@@ -134,6 +149,17 @@ const pickFirstWithContent = (nodes) => {
  return nodes?.[0] ?? null
 }
 const selectNode = (node) => { selectedNode.value = node ? { ...node } : null; renderNodeMath() }
+const selectContentBlock = (block) => {
+  selectedNode.value = {
+    id: block.id,
+    label: block.label,
+    content: block.content,
+    tables: block.tables || [],
+    level: (selectedNode.value?.level || 0) + 1,
+    _isVirtual: true,
+    children: [],
+  }
+}
 const handleNodeClick = (data) => selectNode(data)
 const selectInitialNode = () => selectNode(pickFirstWithContent(treeData.value))
 const setDocFilter = (filter) => { selectedDocFilter.value = filter; nextTick(selectInitialNode) }
@@ -152,7 +178,7 @@ const loadRequirementTree = async (force = false) => {
  if (!documentId.value) return
  loading.value = true
  try {
- const result = await getParseResult(documentId.value, { force })
+ const result = await getParseResult(documentId.value, { force, splitBy: activeSplitBy.value })
  requirementTree.value = result.requirement_tree.children || null
  selectInitialNode()
  } catch (error) {
@@ -168,7 +194,7 @@ const loadBatchRequirementTrees = async (force = false) => {
  for (const doc of batchDocuments.value) {
  parseProgress.value.current = doc.filename
  try {
- const result = await getParseResult(doc.doc_id, { force })
+ const result = await getParseResult(doc.doc_id, { force, splitBy: activeSplitBy.value })
  docTreesById.value[doc.doc_id] = result.requirement_tree
  } catch (error) {
  const msg = error.response?.data?.error || error.message || '解析失败'

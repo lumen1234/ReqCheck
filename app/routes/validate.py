@@ -305,6 +305,28 @@ def format_table_for_validation(table: dict, index: int) -> str:
     return '\n'.join(lines)
 
 
+def format_block_content(block: dict) -> str:
+    """格式化单个虚拟分块的内容（正文 + 关联表格）。"""
+    parts: List[str] = []
+    text = (block.get('content') or '').strip()
+    if text:
+        parts.append('【正文】\n' + text)
+
+    tables = block.get('tables') or []
+    if tables:
+        tbl_parts = []
+        for i, tbl in enumerate(tables, 1):
+            block_text = format_table_for_validation(tbl, i)
+            if block_text:
+                tbl_parts.append(block_text)
+        if tbl_parts:
+            parts.append('【表格内容】\n' + '\n\n'.join(tbl_parts))
+
+    if not parts:
+        return block.get('label') or '（无正文或表格）'
+    return '\n\n'.join(parts)
+
+
 def format_node_validation_content(node: dict) -> str:
     """合并正文、表格、图片说明，供大模型审查。"""
     parts: List[str] = []
@@ -417,16 +439,33 @@ def validate_batch(req_tree, rules):
     return [root_result] + all_results
 
 def collect_nodes(node, nodes, parent_id=None):
-    """收集需求树中的所有节点（含表格、图片等结构化内容）。"""
-    nodes.append({
-        'id': node['id'],
-        'name': node.get('display_title') or node.get('label', node.get('name', '')),
-        'number': node.get('number'),
-        'label': node.get('label'),
-        'display_title': node.get('display_title'),
-        'original_text': format_node_validation_content(node),
-        'parent_id': parent_id,
-    })
+    """收集需求树中的验证节点。存在 content_blocks 时，每个分块作为独立验证单元。"""
+    content_blocks = node.get('content_blocks') or []
+
+    if content_blocks:
+        # 虚拟分块模式：每个分块作为一个独立验证单元
+        for block in content_blocks:
+            block_id = f"{node['id']}_{block['id']}"
+            nodes.append({
+                'id': block_id,
+                'name': block.get('label') or node.get('label', ''),
+                'number': node.get('number'),
+                'label': block.get('label'),
+                'display_title': block.get('label'),
+                'original_text': format_block_content(block),
+                'parent_id': node['id'],
+            })
+    else:
+        # 原始模式：整个节点作为一个验证单元
+        nodes.append({
+            'id': node['id'],
+            'name': node.get('display_title') or node.get('label', node.get('name', '')),
+            'number': node.get('number'),
+            'label': node.get('label'),
+            'display_title': node.get('display_title'),
+            'original_text': format_node_validation_content(node),
+            'parent_id': parent_id,
+        })
 
     children = node.get('children')
     if children is None:
@@ -448,6 +487,7 @@ def construct_validation_prompt(nodes, rules):
 - result: bool，true=合规，false=不合规
 - reason: 简要说明判断依据
 - parent_id: 父节点ID
+- type: 需求类型（功能需求/性能需求/接口需求/安全需求/其他需求等，根据内容判定）
 
 """
     
@@ -528,6 +568,7 @@ def generate_default_results(nodes, error_message: str = ''):
             'name': node['name'],
             'result': True,
             'reason': reason,
-            'parent_id': node.get('parent_id')
+            'parent_id': node.get('parent_id'),
+            'type': '',
         })
     return results

@@ -7,9 +7,9 @@
     </div>
     
     <!-- Tree View -->
-    <div v-else-if="treeData && treeData.length > 0" class="requirement-tree">
+    <div v-else-if="displayTreeData && displayTreeData.length > 0" class="requirement-tree">
       <el-tree
-        :data="treeData"
+        :data="displayTreeData"
         :props="treeProps"
         node-key="id"
         :default-expand-all="true"
@@ -18,7 +18,7 @@
         class="custom-tree"
       >
         <template #default="{ node, data }">
-          <span class="custom-tree-node">
+          <span :class="data._isVirtual ? 'custom-tree-node virtual-block' : 'custom-tree-node'">
             <span class="node-label">{{ data.label }}</span>
           </span>
         </template>
@@ -40,12 +40,13 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { ElTree } from 'element-plus'
 import { FileText } from 'lucide-vue-next'
 import 'element-plus/dist/index.css'
 
 // Props
-defineProps({
+const props = defineProps({
   loading: {
     type: Boolean,
     default: false
@@ -64,6 +65,34 @@ const treeProps = {
   children: 'children',
   label: 'label',
 }
+
+// 将 content_blocks 展开为虚拟子节点（不同颜色标识）
+const expandVirtualBlocks = (nodes) => {
+  if (!nodes || !nodes.length) return nodes
+  return nodes.map(node => {
+    const cloned = { ...node }
+    // 始终递归展开真实子节点
+    const realChildren = node.children ? expandVirtualBlocks(node.children) : []
+    const blocks = node.content_blocks || []
+    if (blocks.length > 0) {
+      const virtualChildren = blocks.filter(b => b.label).map(b => ({
+        id: node.id + '_' + b.id,
+        label: b.label,
+        content: b.content,
+        tables: b.tables || [],
+        level: node.level + 1,
+        _isVirtual: true,
+        children: [],
+      }))
+      cloned.children = [...realChildren, ...virtualChildren]
+    } else {
+      cloned.children = realChildren
+    }
+    return cloned
+  })
+}
+
+const displayTreeData = computed(() => expandVirtualBlocks(props.treeData))
 
 // 处理节点点击事件
 const handleNodeClick = (data, node, component) => {
@@ -147,6 +176,19 @@ const handleLoadMockData = () => {
   justify-content: space-between;
   width: 100%;
   padding-right: 8px;
+}
+
+/* 虚拟分块节点：不同底色区分于真实标题 */
+.virtual-block {
+  background-color: #e0f2fe;
+  border-left: 3px solid #0284c7;
+  border-radius: 0 6px 6px 0;
+  padding-left: 8px !important;
+}
+
+.virtual-block .node-label {
+  color: #1e293b;
+  font-size: 13px;
 }
 
 .node-label {

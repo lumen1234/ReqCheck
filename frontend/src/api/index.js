@@ -81,6 +81,9 @@ export const getParseResult = (docId, options = {}) => {
   if (portalProjectId) {
     params.portal_project_id = portalProjectId
   }
+  if (options.splitBy) {
+    params.split_by = options.splitBy
+  }
   return apiClient.get(`/parse/${docId}`, { params })
 }
 

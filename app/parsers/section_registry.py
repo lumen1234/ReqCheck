@@ -58,11 +58,13 @@ class SectionContext:
     def __init__(self):
         self.current_chapter: Optional[str] = None
         self.current_section: Optional[str] = None
+        self._matched_chapters: set = set()
 
     def sync_number(self, number: str) -> None:
         parts = number.split('.')
         if parts and parts[0].isdigit():
             self.current_chapter = parts[0]
+            self._matched_chapters.add(parts[0])
             if len(parts) >= 2:
                 self.current_section = '.'.join(parts[:2])
             else:
@@ -76,6 +78,11 @@ class SectionContext:
 
         for num, keys in CHAPTER_1.items():
             if _label_matches(label, keys):
+                # 防止已确立的章节被正文中相同关键词覆盖
+                # （如正文中的"范围"不应覆盖已通过编号标题建立的当前章节）
+                if num in self._matched_chapters and num != self.current_chapter:
+                    continue
+                self._matched_chapters.add(num)
                 self.current_chapter = num
                 self.current_section = None
                 short = _pick_short_label(label, keys)

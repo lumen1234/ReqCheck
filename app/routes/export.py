@@ -46,31 +46,86 @@ def _flatten_tree(req_tree, validation_map, doc_number=1, counter_start=1, node_
 
 	def traverse_tree(node, parent_id):
 		nonlocal req_id_counter
-		req_id = f"req{req_id_counter}"
-		req_id_counter +=1
-		raw_node_id = node.get('id', '')
-		node_id = f'{node_id_prefix}{raw_node_id}' if node_id_prefix else raw_node_id
-		validation = validation_map.get(raw_node_id, {})
-		requirement = {
-			'id': req_id,
-			'doc': doc_number,
-			'node_id': node_id,
-			'title': node.get('label', node.get('name', '')),
-			'content': node.get('content', ''),
-			'content_html': node.get('content_html', ''),
-			'tables': node.get('tables') or [],
-			'images': node.get('images') or [],
-			'level': node.get('level',0),
-			'parent_id': parent_id,
-			'is_req': node.get('is_req',0),
-			'validation_result': validation.get('result') if validation else None,
-			'validation_reason': validation.get('reason', '') if validation else '',
-		}
-		if node.get('is_req') ==1:
-			requirement['type'] = node.get('type', '')
-		requirements.append(requirement)
-		for child in node.get('children') or []:
-			traverse_tree(child, req_id)
+		content_blocks = node.get('content_blocks') or []
+
+		if content_blocks:
+			# 先导出标题节点自身（作为容器），再导出分块作为其子节点
+			heading_req_id = f"req{req_id_counter}"
+			req_id_counter += 1
+			raw_node_id = node.get('id', '')
+			heading_node_id = f'{node_id_prefix}{raw_node_id}' if node_id_prefix else raw_node_id
+			validation = validation_map.get(raw_node_id, {})
+			heading = {
+				'id': heading_req_id,
+				'doc': doc_number,
+				'node_id': heading_node_id,
+				'title': node.get('label', node.get('name', '')),
+				'content': node.get('content', ''),
+				'content_html': node.get('content_html', ''),
+				'tables': node.get('tables') or [],
+				'images': node.get('images') or [],
+				'level': node.get('level', 0),
+				'parent_id': parent_id,
+				'is_req': 0,
+				'validation_result': validation.get('result') if validation else None,
+				'validation_reason': validation.get('reason', '') if validation else '',
+				'type': validation.get('type', '') if validation else '',
+			}
+			if node.get('is_req') == 1:
+				heading['type'] = node.get('type', '')
+			requirements.append(heading)
+
+			block_parent_id = heading_req_id
+			for block in content_blocks:
+				req_id = f"req{req_id_counter}"
+				req_id_counter += 1
+				block_raw_id = f"{node.get('id', '')}_{block['id']}"
+				block_node_id = f'{node_id_prefix}{block_raw_id}' if node_id_prefix else block_raw_id
+				validation = validation_map.get(block_raw_id, {})
+				requirement = {
+					'id': req_id,
+					'doc': doc_number,
+					'node_id': block_node_id,
+					'title': block.get('label', node.get('label', '')),
+					'content': block.get('content', ''),
+					'tables': block.get('tables') or [],
+					'level': node.get('level', 0) + 1,
+					'parent_id': block_parent_id,
+					'is_req': 1,
+					'validation_result': validation.get('result') if validation else None,
+					'validation_reason': validation.get('reason', '') if validation else '',
+					'type': validation.get('type', '') if validation else '',
+				}
+				requirements.append(requirement)
+			for child in node.get('children') or []:
+				traverse_tree(child, heading_req_id)
+		else:
+			req_id = f"req{req_id_counter}"
+			req_id_counter +=1
+			raw_node_id = node.get('id', '')
+			node_id = f'{node_id_prefix}{raw_node_id}' if node_id_prefix else raw_node_id
+			validation = validation_map.get(raw_node_id, {})
+			requirement = {
+				'id': req_id,
+				'doc': doc_number,
+				'node_id': node_id,
+				'title': node.get('label', node.get('name', '')),
+				'content': node.get('content', ''),
+				'content_html': node.get('content_html', ''),
+				'tables': node.get('tables') or [],
+				'images': node.get('images') or [],
+				'level': node.get('level',0),
+				'parent_id': parent_id,
+				'is_req': node.get('is_req',0),
+				'validation_result': validation.get('result') if validation else None,
+				'validation_reason': validation.get('reason', '') if validation else '',
+				'type': validation.get('type', '') if validation else '',
+			}
+			if node.get('is_req') ==1:
+				requirement['type'] = node.get('type', '')
+			requirements.append(requirement)
+			for child in node.get('children') or []:
+				traverse_tree(child, req_id)
 
 	traverse_tree(req_tree, 'root')
 	return requirements, req_id_counter

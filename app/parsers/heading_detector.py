@@ -70,52 +70,36 @@ def normalize_heading_label(label: str) -> str:
     return label
 
 
-def looks_like_body_section_title(text: str) -> bool:
-    """正文中的无编号小标题，如「标识」「系统概述」。"""
-    text = text.strip()
-    if not text or len(text) > 35 or len(text) < 2:
-        return False
-    if is_toc_line(text) or LIST_ITEM_RE.match(text):
-        return False
-    if parse_heading_line(text):
-        return False
-    if text.endswith(('。', '；', ';', '.', '：', ':')):
-        return False
-    if any(m in text for m in _INLINE_BODY_MARKERS):
-        return False
-    if re.match(r'^表\s*\d+', text) or re.match(r'^图\s*\d+', text):
-        return False
-    return True
-
-
 def level_from_number(number: str) -> int:
     parts = [p for p in number.split('.') if p and p.lower() != 'x']
     return len(parts) if parts else 1
 
 
 def label_looks_like_requirement_content(label: str) -> bool:
- """判断编号后的标签文本是否更像需求正文，而不是短标题。"""
- label = (label or '').strip()
- if not label:
-	 return False
- # 4-6 字短词（如「应急响应」「系统概述」）即使碰巧含关键词也大概率是真标题
- if len(label) <= 6:
-	 return False
- if len(label) >20:
-	 return True
- if label.endswith(('。', '；', ';', '，', ',', '！', '!', '？', '?')):
-	 return True
- if _CONDITION_SENTENCE_RE.match(label):
-	 return True
- if _REQUIREMENT_SUBJECT_RE.match(label) and _REQUIREMENT_KEYWORDS_RE.search(label):
-	 return True
- if _REQUIREMENT_KEYWORDS_RE.search(label) and len(label) >=8:
-	 return True
- if any(label.startswith(starter) for starter in _REQUIREMENT_LABEL_STARTERS):
-	 # 仅以关键词开头是弱信号，需附加条件才判为需求内容
-	 if _REQUIREMENT_KEYWORDS_RE.search(label) or len(label) >= 10:
-	 	return True
- return False
+	"""判断编号后的标签文本是否更像需求正文，而不是短标题。"""
+	label = (label or '').strip()
+	if not label:
+		return False
+	# 4-6 字短词（如「应急响应」「系统概述」）即使碰巧含关键词也大概率是真标题
+	if len(label) <= 6:
+		return False
+	if len(label) > 20:
+		return True
+	if label.endswith(('。', '；', ';', '，', ',', '！', '!', '？', '?')):
+		# 短文本以标点结尾未必是需求正文，要求至少10字才有足够信号
+		if len(label) >= 10:
+			return True
+	if _CONDITION_SENTENCE_RE.match(label):
+		return True
+	if _REQUIREMENT_SUBJECT_RE.match(label) and _REQUIREMENT_KEYWORDS_RE.search(label):
+		return True
+	if _REQUIREMENT_KEYWORDS_RE.search(label) and len(label) >= 8:
+		return True
+	if any(label.startswith(starter) for starter in _REQUIREMENT_LABEL_STARTERS):
+		# 仅以关键词开头是弱信号，需附加条件才判为需求内容
+		if _REQUIREMENT_KEYWORDS_RE.search(label) or len(label) >= 10:
+			return True
+	return False
 
 def parse_heading_line(line: str) -> Optional[Tuple[str, str, int]]:
     """从匹配数字编号模式的行中提取 (number, label, level)。
@@ -206,10 +190,6 @@ def split_heading_label(label: str) -> Tuple[str, Optional[str]]:
         if idx == 0:
             return '', label
 
-    if len(label) > 40:
-        for sep in ('，', '。', '；', ';'):
-            idx = label.find(sep)
-            if 2 < idx < 25:
-                return label[:idx + 1].strip(), label[idx + 1:].strip()
-
+    # 不再按标点符号切分长标题——标点（尤其是逗号）在长标题中很常见，
+    # 按标点切分会导致标题被截断、后半部分误判为正文。
     return label, None

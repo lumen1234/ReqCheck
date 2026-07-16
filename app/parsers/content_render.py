@@ -176,10 +176,19 @@ def _strip_image_placeholders(text: str) -> str:
     return '\n'.join(out).strip()
 
 
+def _strip_table_markers(text: str) -> str:
+    """去掉 content 中的 [TABLE:id] 表格占位标记。"""
+    if not text:
+        return ''
+    return re.sub(r'^\[TABLE:[^\]]+\]\n?', '', text, flags=re.MULTILINE).strip()
+
+
 def build_display_content(node: Dict[str, Any]) -> str:
     """纯文本展示：不含表格/图片占位，结构化数据见 tables / images 字段。"""
     base = _strip_image_placeholders(
-        _strip_plain_table_blocks(_strip_markdown_tables((node.get('content') or '').strip()))
+        _strip_plain_table_blocks(_strip_markdown_tables(
+            _strip_table_markers((node.get('content') or '').strip())
+        ))
     )
     return base
 

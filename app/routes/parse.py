@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify, send_file, make_response
 from app import app
 from app.models import db, Document as DocModel, DocumentBatch, RequirementTree
 from app.parsers import parse_document_to_tree, compute_document_text_hash
+from app.parsers.pipeline import split_content_by_keyword
 from app.parsers.content_render import enrich_tree_display
 from app.parsers.image_convert import load_browser_image_file, sniff_image_format
 from app.services import project_service
@@ -90,9 +91,10 @@ def _resolve_doc_for_parse(doc_id, portal_project_id=None):
 	return document.file_path, document.filename, document
 
 
-def parse_document_payload(doc_id, force=False, portal_project_id=None):
+def parse_document_payload(doc_id, force=False, portal_project_id=None, split_by=None):
 	parse_dir = _parse_output_folder()
 	existing_json = os.path.join(parse_dir, f'{doc_id}.json')
+	# 分块依赖 [TABLE:...] 标记，缓存结果中标记已被清除，需强制重解析
 	if not force and os.path.exists(existing_json):
 		with open(existing_json, 'r', encoding='utf-8') as f:
 			req_tree = json.load(f)
@@ -123,7 +125,7 @@ def parse_document_payload(doc_id, force=False, portal_project_id=None):
 				req_tree = _prepare_tree_for_response(req_tree, doc_id)
 				output_path = _persist_parse_result(doc_id, document, req_tree, text_hash, cache_index)
 				return {'requirement_tree': req_tree, 'output_file': output_path, 'cached': True, 'cached_from': cached_doc_id}
-	req_tree = parse_document_to_tree(filepath=filepath, filename=filename, doc_id=doc_id, assets_base_folder=_assets_folder())
+	req_tree = parse_document_to_tree(filepath=filepath, filename=filename, doc_id=doc_id, assets_base_folder=_assets_folder(), split_by=split_by)
 	classify_requirement_tree(req_tree)
 	output_path = _persist_parse_result(doc_id, document, req_tree, text_hash, cache_index)
 	return {'requirement_tree': req_tree, 'output_file': output_path, 'cached': False}
@@ -135,8 +137,10 @@ def parse_document(doc_id):
 		return jsonify({'error': 'doc_id is required'}),400
 	force = request.args.get('force', '').lower() in ('1', 'true', 'yes')
 	portal_project_id = request.args.get('portal_project_id') or None
+	split_by = request.args.get('split_by') or None
 	try:
-		return jsonify(parse_document_payload(doc_id, force=force, portal_project_id=portal_project_id))
+		payload = parse_document_payload(doc_id, force=force, portal_project_id=portal_project_id, split_by=split_by)
+		return jsonify(payload)
 	except FileNotFoundError:
 		return jsonify({'error': 'Document not found'}),404
 	except ValueError as e:

@@ -170,6 +170,8 @@ def build_requirement_tree(
             flush_content(stack[-1])
             if block.table:
                 append_table(stack[-1], block.table)
+                # 在正文中插入占位标记，供后续按关键词分块时关联表格
+                content_parts.append(f'[TABLE:tbl_{table_counter:03d}]')
 
         elif block.type == 'image':
             flush_content(stack[-1])
