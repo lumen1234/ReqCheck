@@ -108,10 +108,12 @@ const isBatchMode = computed(() => route.query.mode === 'batch')
 const loading = ref(false)
 const requirementTree = ref(null)
 const selectedNode = ref(null)
-const splitKeyword = ref('需求标识')
-const activeSplitBy = ref('需求标识')
+const savedKw = localStorage.getItem('reqcheck_split_keyword') || '需求标识'
+const splitKeyword = ref(savedKw)
+const activeSplitBy = ref(savedKw)
 const applySplit = () => {
   activeSplitBy.value = splitKeyword.value.trim()
+  localStorage.setItem("reqcheck_split_keyword", activeSplitBy.value)
   isBatchMode.value ? loadBatch(true) : loadRequirementTree(true)
 }
 const contentHtmlRef = ref(null)
@@ -219,8 +221,8 @@ const loadBatch = async (force = false) => {
 }
 const refreshParse = () => isBatchMode.value ? loadBatch(true) : loadRequirementTree(true)
 const goToNext = () => {
- if (isBatchMode.value) router.push({ name: 'validate', params: { documentId: documentId.value }, query: withPortalQuery({ docName: documentName.value, mode: 'batch' }) })
- else router.push({ name: 'validate', params: { documentId: documentId.value }, query: withPortalQuery({ docName: documentName.value }) })
+ if (isBatchMode.value) router.push({ name: 'validate', params: { documentId: documentId.value }, query: withPortalQuery({ docName: documentName.value, mode: 'batch', splitBy: activeSplitBy.value }) })
+ else router.push({ name: 'validate', params: { documentId: documentId.value }, query: withPortalQuery({ docName: documentName.value, splitBy: activeSplitBy.value }) })
 }
 const loadMockData = () => { requirementTree.value = [{ id: 'req-1', label: '示例需求', content: '示例内容', level:1, children: [] }]; selectInitialNode() }
 onMounted(() => { isBatchMode.value ? loadBatch() : loadRequirementTree() })

@@ -19,6 +19,9 @@ def compute_file_hash(filepath):
 
 
 def allowed_file(filename):
+	# 过滤 Word 临时锁定文件（~$ 开头）
+	if filename.startswith('~$'):
+		return False
 	return '.' in filename and filename.rsplit('.',1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 
