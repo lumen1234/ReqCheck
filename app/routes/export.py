@@ -70,6 +70,10 @@ def _flatten_tree(req_tree, validation_map, doc_number=1, counter_start=1, node_
 				'validation_result': validation.get('result') if validation else None,
 				'validation_reason': validation.get('reason', '') if validation else '',
 				'type': validation.get('type', '') if validation else '',
+				'test_difficulty': '',
+				'needs_special_env': False,
+				'needs_mock': False,
+				'test_assessment_reason': '',
 			}
 			if node.get('is_req') == 1:
 				heading['type'] = node.get('type', '')
@@ -95,6 +99,10 @@ def _flatten_tree(req_tree, validation_map, doc_number=1, counter_start=1, node_
 					'validation_result': validation.get('result') if validation else None,
 					'validation_reason': validation.get('reason', '') if validation else '',
 					'type': validation.get('type', '') if validation else '',
+					'test_difficulty': node.get('test_difficulty', ''),
+					'needs_special_env': node.get('needs_special_env', False),
+					'needs_mock': node.get('needs_mock', False),
+					'test_assessment_reason': node.get('test_assessment_reason', ''),
 				}
 				requirements.append(requirement)
 			for child in node.get('children') or []:
@@ -120,6 +128,10 @@ def _flatten_tree(req_tree, validation_map, doc_number=1, counter_start=1, node_
 				'validation_result': validation.get('result') if validation else None,
 				'validation_reason': validation.get('reason', '') if validation else '',
 				'type': validation.get('type', '') if validation else '',
+				'test_difficulty': node.get('test_difficulty', ''),
+				'needs_special_env': node.get('needs_special_env', False),
+				'needs_mock': node.get('needs_mock', False),
+				'test_assessment_reason': node.get('test_assessment_reason', ''),
 			}
 			if node.get('is_req') ==1:
 				requirement['type'] = node.get('type', '')

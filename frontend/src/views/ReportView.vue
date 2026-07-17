@@ -15,6 +15,12 @@
               <span>导出JSON</span>
             </button>
 
+            <button @click="exportWord"
+              class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg transition-all shadow-sm flex items-center space-x-2">
+              <FileText class="w-4 h-4" />
+              <span>导出Word报告</span>
+            </button>
+
             <button @click="startNew"
               class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold rounded-lg transition-all flex items-center space-x-2">
               <RotateCw class="w-4 h-4" />
@@ -175,7 +181,7 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { exportRequirements, exportBatchRequirements } from '../api'
+import { exportRequirements, exportBatchRequirements, exportWordReport, exportBatchWordReport } from '../api'
 import { Download, RotateCw, FileText } from 'lucide-vue-next'
 import RequirementTree from '../components/RequirementTree.vue'
 import { renderMathInElement } from '../utils/mathRender'
@@ -385,6 +391,32 @@ const exportJSON = () => {
   } catch (error) {
     console.error('Export failed:', error)
     alert('导出失败，请重试')
+  }
+}
+
+// 导出Word报告
+const exportWord = async () => {
+  if (!flatRequirements.value || flatRequirements.value.length === 0) {
+    alert('暂无数据可导出')
+    return
+  }
+
+  try {
+    const blob = isBatchMode.value
+      ? await exportBatchWordReport(documentId.value)
+      : await exportWordReport(documentId.value)
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    a.download = isBatchMode.value
+      ? `验证报告_批次_${dateStr}.docx`
+      : `验证报告_${dateStr}.docx`
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Word export failed:', error)
+    alert('导出Word报告失败，请重试')
   }
 }
 

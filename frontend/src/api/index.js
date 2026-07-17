@@ -158,4 +158,32 @@ export const exportBatchRequirements = (batchId, portalProjectId = getPortalProj
  return apiClient.get(`/export/batch/${batchId}`, { params })
 }
 
+/**
+ * 导出需求验证 Word 报告（单文档）
+ * @param {string} docId
+ * @param {string|null} portalProjectId
+ * @returns {Promise<Blob>}
+ */
+export const exportWordReport = (docId, portalProjectId = getPortalProjectId()) => {
+  const params = portalProjectId ? { portal_project_id: portalProjectId } : {}
+  return apiClient.get(`/export/${docId}/word`, {
+    params,
+    responseType: 'blob'
+  })
+}
+
+/**
+ * 导出需求验证 Word 报告（批量）
+ * @param {string} batchId
+ * @param {string|null} portalProjectId
+ * @returns {Promise<Blob>}
+ */
+export const exportBatchWordReport = (batchId, portalProjectId = getPortalProjectId()) => {
+  const params = portalProjectId ? { portal_project_id: portalProjectId } : {}
+  return apiClient.get(`/export/batch/${batchId}/word`, {
+    params,
+    responseType: 'blob'
+  })
+}
+
 export default apiClient

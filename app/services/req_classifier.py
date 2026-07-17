@@ -52,14 +52,28 @@ TYPE_CLASSIFICATION_GUIDELINES = """
 4. 表格/接口描述优先判为「接口需求」；纯性能指标优先判为「性能需求」。
 """
 
+TEST_ASSESSMENT_GUIDELINES = """
+## 测试评估原则（is_req=1 时必须填写）
+1. test_difficulty（测试难度）分为三档：
+   - "低"：可通过简单输入/输出验证，无需复杂环境或外部依赖。
+   - "中"：需要多步骤业务流程、特定数据准备或集成测试。
+   - "高"：需要专用硬件设备、复杂环境条件、实时系统、安全关键场景，或涉及多系统协调。
+2. needs_special_env（是否需要特殊环境）：测试是否需要特定硬件、操作系统、网络条件、授权软件、物理场地等非标准开发环境。
+3. needs_mock（是否需要Mock/打桩）：测试是否需要模拟/打桩外部系统、API、数据库、传感器、硬件设备等依赖。
+4. test_assessment_reason：简要说明判断依据，30字以内。
+"""
+
 
 def _node_needs_classification(node: Dict[str, Any]) -> bool:
     if node.get('id') == 'root':
         return False
     if 'is_req' not in node:
         return True
-    if node.get('is_req') == 1 and 'type' not in node:
-        return True
+    if node.get('is_req') == 1:
+        if 'type' not in node:
+            return True
+        if 'test_difficulty' not in node:
+            return True
     return False
 
 
@@ -113,14 +127,19 @@ def _build_classification_prompt(nodes: List[Dict[str, Any]]) -> str:
     type_list = '、'.join(f'「{t}」' for t in REQUIREMENT_TYPES)
     prompt = (
         '你是软件需求分析专家，熟悉 GJB 438C 软件需求规格说明（SRS）。\n'
-        '请对每个节点同时判断：① 是否需落实到代码（is_req）；② 若为需求则推断类型（type）。\n'
+        '请对每个节点同时判断：① 是否需落实到代码（is_req）；② 若为需求则推断类型（type）；③ 若为需求则评估测试难度与环境依赖。\n'
         + CLASSIFICATION_GUIDELINES
         + TYPE_CLASSIFICATION_GUIDELINES
+        + TEST_ASSESSMENT_GUIDELINES
         + f'\n允许的类型取值（必须完全一致）：{type_list}\n'
         + '\n返回 JSON 数组，每个元素包含：\n'
         '- id: 节点ID\n'
         '- is_req: 整数，1=需落实到代码，0=不需要\n'
         '- type: 仅 is_req=1 时填写，为上述 10 种类型之一；is_req=0 时不含此字段\n'
+        '- test_difficulty: 仅 is_req=1 时填写，"低"/"中"/"高"\n'
+        '- needs_special_env: 仅 is_req=1 时填写，true/false\n'
+        '- needs_mock: 仅 is_req=1 时填写，true/false\n'
+        '- test_assessment_reason: 仅 is_req=1 时填写，简要说明判断依据\n'
     )
 
     for i, node in enumerate(nodes):
@@ -134,7 +153,7 @@ def _build_classification_prompt(nodes: List[Dict[str, Any]]) -> str:
     prompt += (
         '\n请严格按照以下格式返回，不要包含其他无关内容：\n'
         '[\n'
-        '  {"id": "节点ID", "is_req": 1, "type": "功能需求"},\n'
+        '  {"id": "节点ID", "is_req": 1, "type": "功能需求", "test_difficulty": "中", "needs_special_env": false, "needs_mock": true, "test_assessment_reason": "需要模拟外部接口数据"},\n'
         '  {"id": "节点ID", "is_req": 0},\n'
         '  ...\n'
         ']\n'
@@ -176,6 +195,10 @@ def _default_classification_results(nodes: List[Dict[str, Any]]) -> List[Dict[st
         item: Dict[str, Any] = {'id': node['id'], 'is_req': is_req}
         if is_req == 1:
             item['type'] = DEFAULT_REQUIREMENT_TYPE
+            item['test_difficulty'] = '中'
+            item['needs_special_env'] = False
+            item['needs_mock'] = False
+            item['test_assessment_reason'] = ''
         results.append(item)
     return results
 
@@ -196,6 +219,41 @@ def _normalize_requirement_type(value: Any) -> str:
     return DEFAULT_REQUIREMENT_TYPE
 
 
+def _normalize_test_difficulty(value: Any) -> str:
+    if value is None:
+        return '中'
+    text = str(value).strip()
+    if text in ('低', '中', '高'):
+        return text
+    if '低' in text or 'low' in text.lower() or '简单' in text or '容易' in text:
+        return '低'
+    if '高' in text or 'high' in text.lower() or '困难' in text or '复杂' in text:
+        return '高'
+    return '中'
+
+
+def _normalize_needs_special_env(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    return text in ('true', '1', 'yes', '是')
+
+
+def _normalize_needs_mock(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    return text in ('true', '1', 'yes', '是')
+
+
 def _apply_results_to_tree(tree: Dict[str, Any], result_map: Dict[str, Dict[str, Any]]) -> None:
     node_id = tree.get('id')
     if node_id == 'root':
@@ -210,9 +268,17 @@ def _apply_results_to_tree(tree: Dict[str, Any], result_map: Dict[str, Dict[str,
         if tree['is_req'] == 1:
             tree['type'] = _normalize_requirement_type(item.get('type'))
             tree.pop('type_reason', None)
+            tree['test_difficulty'] = _normalize_test_difficulty(item.get('test_difficulty'))
+            tree['needs_special_env'] = _normalize_needs_special_env(item.get('needs_special_env'))
+            tree['needs_mock'] = _normalize_needs_mock(item.get('needs_mock'))
+            tree['test_assessment_reason'] = str(item.get('test_assessment_reason') or '').strip()
         else:
             tree.pop('type', None)
             tree.pop('type_reason', None)
+            tree.pop('test_difficulty', None)
+            tree.pop('needs_special_env', None)
+            tree.pop('needs_mock', None)
+            tree.pop('test_assessment_reason', None)
     else:
         tree.setdefault('is_req', 0)
         tree.pop('is_req_reason', None)
