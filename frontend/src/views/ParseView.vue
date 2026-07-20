@@ -26,7 +26,6 @@
  </div>
  <div class="flex flex-wrap items-center gap-1.5">
  <span class="text-xs font-semibold text-slate-600 mr-0.5">文档转换器</span>
- <button @click="setDocFilter('all')" :class="selectedDocFilter === 'all' ? 'bg-primary-900 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'" class="px-2 py-0.5 rounded text-xs font-medium transition-all">全部</button>
  <button v-for="doc in batchDocuments" :key="doc.doc_id" @click="setDocFilter(doc.doc_id)" :class="selectedDocFilter === doc.doc_id ? 'bg-primary-900 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'" class="px-2 py-0.5 rounded text-xs font-medium transition-all max-w-[14rem] truncate" :title="doc.filename">
  doc {{ doc.doc }}：{{ doc.filename }}
  </button>
@@ -36,11 +35,17 @@
 
  <div class="flex-1 overflow-hidden flex">
  <div class="w-1/3 border-r border-slate-200 overflow-y-auto flex flex-col">
- <div class="px-6 pt-4 pb-2 border-b border-slate-100">
- <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">内容分块关键词</label>
- <div class="flex gap-2">
+ <div class="px-6 pt-4 pb-2 border-b border-slate-100 space-y-2">
+ <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide">内容分块关键词</label>
+ <!-- 单文档模式 -->
+ <div v-if="!isBatchMode" class="flex gap-2">
  <input v-model="splitKeyword" type="text" placeholder="输入分块关键词..." class="flex-1 px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500" @keyup.enter="applySplit" />
  <button @click="applySplit" class="px-3 py-1.5 text-sm font-semibold bg-primary-900 hover:bg-primary-800 text-white rounded-lg transition-all">应用</button>
+ </div>
+ <!-- 批量模式：各文档独立关键词 + 仅解析当前文档 -->
+ <div v-else class="flex gap-2">
+ <input v-model="currentDocKeyword" type="text" :placeholder="savedKw || '需求标识'" class="flex-1 px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500" @keyup.enter="applyCurrentDocSplit" />
+ <button @click="applyCurrentDocSplit" class="px-3 py-1.5 text-sm font-semibold bg-primary-900 hover:bg-primary-800 text-white rounded-lg transition-all">解析当前文档</button>
  </div>
  </div>
  <div class="flex-1 overflow-y-auto p-6">
@@ -108,13 +113,86 @@ const isBatchMode = computed(() => route.query.mode === 'batch')
 const loading = ref(false)
 const requirementTree = ref(null)
 const selectedNode = ref(null)
-const savedKw = localStorage.getItem('reqcheck_split_keyword') || '需求标识'
+const STORAGE_KEY = 'reqcheck_split_keyword'
+const PER_DOC_STORAGE_KEY = 'reqcheck_per_doc_keywords'
+const DEFAULT_KW = '需求标识'
+
+function _loadPerDocKeywords() {
+  try { return JSON.parse(localStorage.getItem(PER_DOC_STORAGE_KEY) || '{}') } catch { return {} }
+}
+function _savePerDocKeywords(map) {
+  localStorage.setItem(PER_DOC_STORAGE_KEY, JSON.stringify(map))
+}
+
+const savedKw = localStorage.getItem(STORAGE_KEY) || DEFAULT_KW
 const splitKeyword = ref(savedKw)
 const activeSplitBy = ref(savedKw)
+const perDocKeywords = ref({})
+
+/** 当前选中文档的关键词（双向绑定到输入框） */
+const currentDocKeyword = computed({
+  get() {
+    const docId = selectedDocFilter.value
+    return docId ? (perDocKeywords.value[docId] || '') : ''
+  },
+  set(val) {
+    const docId = selectedDocFilter.value
+    if (docId) {
+      perDocKeywords.value[docId] = val
+    }
+  },
+})
+
+/** 初始化各文档关键词（批量文档加载后调用） */
+function initPerDocKeywords() {
+  const saved = _loadPerDocKeywords()
+  const next = { ...perDocKeywords.value }
+  for (const doc of batchDocuments.value) {
+    if (!(doc.doc_id in next)) {
+      next[doc.doc_id] = saved[doc.doc_id] || splitKeyword.value
+    }
+  }
+  perDocKeywords.value = next
+}
+
+/** 获取某文档实际使用的分块关键词 */
+function getDocSplitKeyword(docId) {
+  return (perDocKeywords.value[docId] || activeSplitBy.value).trim() || DEFAULT_KW
+}
+
+/** 解析单个文档（保留 docTreesById 中其他文档的数据） */
+async function parseSingleDoc(docId) {
+  const doc = batchDocuments.value.find(d => d.doc_id === docId)
+  if (!doc) return
+  loading.value = true
+  try {
+    const docSplitBy = getDocSplitKeyword(docId)
+    const result = await getParseResult(docId, { force: true, splitBy: docSplitBy })
+    docTreesById.value[docId] = result.requirement_tree
+  } catch (error) {
+    const msg = error.response?.data?.error || error.message || '解析失败'
+    alert(msg)
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 解析当前选中文档 */
+function applyCurrentDocSplit() {
+  _savePerDocKeywords(perDocKeywords.value)
+  const docId = selectedDocFilter.value
+  if (!docId) return
+  parseSingleDoc(docId)
+}
+
 const applySplit = () => {
   activeSplitBy.value = splitKeyword.value.trim()
-  localStorage.setItem("reqcheck_split_keyword", activeSplitBy.value)
-  isBatchMode.value ? loadBatch(true) : loadRequirementTree(true)
+  localStorage.setItem(STORAGE_KEY, activeSplitBy.value)
+  if (isBatchMode.value) {
+    applyCurrentDocSplit()
+  } else {
+    loadRequirementTree(true)
+  }
 }
 const contentHtmlRef = ref(null)
 const batchDocuments = ref([])
@@ -135,12 +213,11 @@ const transformNode = (node, meta = {}) => {
  return transformed
 }
 const convertToTreeData = (jsonData, meta = {}) => Array.isArray(jsonData) ? jsonData.map((node) => transformNode(node, meta)) : []
-const combinedTreeData = computed(() => batchDocuments.value.map((doc) => ({ id: `doc-${doc.doc}`, label: `文档 ${doc.doc}：${doc.filename}`, level:1, doc: doc.doc, doc_id: doc.doc_id, source_filename: doc.filename, children: convertToTreeData(docTreesById.value[doc.doc_id]?.children || [], doc) })))
 const treeData = computed(() => {
  if (!isBatchMode.value) return convertToTreeData(requirementTree.value)
- if (selectedDocFilter.value === 'all') return combinedTreeData.value
- const doc = batchDocuments.value.find((item) => item.doc_id === selectedDocFilter.value) || {}
- return convertToTreeData(docTreesById.value[selectedDocFilter.value]?.children || [], doc)
+ const docId = selectedDocFilter.value
+ const doc = batchDocuments.value.find((item) => item.doc_id === docId) || {}
+ return convertToTreeData(docTreesById.value[docId]?.children || [], doc)
 })
 const pickFirstWithContent = (nodes) => {
  for (const node of nodes || []) {
@@ -196,7 +273,7 @@ const loadBatchRequirementTrees = async (force = false) => {
  for (const doc of batchDocuments.value) {
  parseProgress.value.current = doc.filename
  try {
- const result = await getParseResult(doc.doc_id, { force, splitBy: activeSplitBy.value })
+ const result = await getParseResult(doc.doc_id, { force, splitBy: getDocSplitKeyword(doc.doc_id) })
  docTreesById.value[doc.doc_id] = result.requirement_tree
  } catch (error) {
  const msg = error.response?.data?.error || error.message || '解析失败'
@@ -206,7 +283,8 @@ const loadBatchRequirementTrees = async (force = false) => {
  if (parseProgress.value.errors.length) {
  alert('部分文档解析失败：\n' + parseProgress.value.errors.map((e) => `${e.filename}: ${e.error}`).join('\n'))
  }
- selectedDocFilter.value = 'all'
+ const firstDoc = batchDocuments.value[0]
+ selectedDocFilter.value = firstDoc ? firstDoc.doc_id : ''
  selectInitialNode()
  loading.value = false
 }
@@ -216,12 +294,13 @@ const loadBatch = async (force = false) => {
  try {
  const result = await getBatchDetail(documentId.value)
  batchDocuments.value = result.documents || []
+ initPerDocKeywords()
  } catch (error) { console.error('Failed to load batch:', error); loading.value = false; return }
  await loadBatchRequirementTrees(force)
 }
 const refreshParse = () => isBatchMode.value ? loadBatch(true) : loadRequirementTree(true)
 const goToNext = () => {
- if (isBatchMode.value) router.push({ name: 'validate', params: { documentId: documentId.value }, query: withPortalQuery({ docName: documentName.value, mode: 'batch', splitBy: activeSplitBy.value }) })
+ if (isBatchMode.value) router.push({ name: 'validate', params: { documentId: documentId.value }, query: withPortalQuery({ docName: documentName.value, mode: 'batch' }) })
  else router.push({ name: 'validate', params: { documentId: documentId.value }, query: withPortalQuery({ docName: documentName.value, splitBy: activeSplitBy.value }) })
 }
 const loadMockData = () => { requirementTree.value = [{ id: 'req-1', label: '示例需求', content: '示例内容', level:1, children: [] }]; selectInitialNode() }

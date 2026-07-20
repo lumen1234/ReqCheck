@@ -58,6 +58,13 @@ def _generate_word_report(requirements, doc_name, batch_name=None):
     """生成 Word 报告文件，返回临时文件路径。"""
     doc = DocxDocument()
 
+    # ── 辅助：将段落所有 run 设为宋体 ──
+    def _set_run_font(run, size=None):
+        run.font.name = '宋体'
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+        if size:
+            run.font.size = size
+
     # ── 全局样式 ──
     style = doc.styles['Normal']
     font = style.font
@@ -68,6 +75,8 @@ def _generate_word_report(requirements, doc_name, batch_name=None):
     # ── 封面 / 标题 ──
     title = doc.add_heading('需求验证报告', level=0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in title.runs:
+        _set_run_font(run)
 
     info_lines = [
         f'文档名称：{doc_name}',
@@ -81,7 +90,9 @@ def _generate_word_report(requirements, doc_name, batch_name=None):
         p.paragraph_format.space_after = Pt(4)
 
     # ── 一、验证范围 ──
-    doc.add_heading('一、验证范围', level=1)
+    h1 = doc.add_heading('一、验证范围', level=1)
+    for run in h1.runs:
+        _set_run_font(run)
     req_count = sum(1 for r in requirements if r.get('is_req') == 1)
     scope_text = (
         f'本报告对"{doc_name}"中的需求条目进行了 GJB 438C 附录 J 合规性验证。'
@@ -90,7 +101,9 @@ def _generate_word_report(requirements, doc_name, batch_name=None):
     doc.add_paragraph(scope_text)
 
     # ── 二、逐条验证结论 ──
-    doc.add_heading('二、逐条验证结论', level=1)
+    h2 = doc.add_heading('二、逐条验证结论', level=1)
+    for run in h2.runs:
+        _set_run_font(run)
 
     table = doc.add_table(rows=1, cols=len(TABLE_COLS), style='Table Grid')
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -102,7 +115,7 @@ def _generate_word_report(requirements, doc_name, batch_name=None):
         for paragraph in hdr_cells[i].paragraphs:
             for run in paragraph.runs:
                 run.bold = True
-                run.font.size = Pt(9)
+                _set_run_font(run, size=Pt(9))
 
     # 数据行
     for item in requirements:
@@ -137,10 +150,12 @@ def _generate_word_report(requirements, doc_name, batch_name=None):
             row_cells[i].text = val
             for paragraph in row_cells[i].paragraphs:
                 for run in paragraph.runs:
-                    run.font.size = Pt(9)
+                    _set_run_font(run, size=Pt(9))
 
     # ── 三、通过率统计 ──
-    doc.add_heading('三、通过率统计', level=1)
+    h3 = doc.add_heading('三、通过率统计', level=1)
+    for run in h3.runs:
+        _set_run_font(run)
 
     req_items = [r for r in requirements if r.get('is_req') == 1]
     total = len(req_items)
