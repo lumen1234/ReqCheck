@@ -10,6 +10,7 @@ ENV/
 env.bak/
 tmp/
 temp/
+.venv/
 
 # IDE
 .vscode/
