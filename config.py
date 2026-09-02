@@ -31,8 +31,19 @@ SQLALCHEMY_DATABASE_URI = "sqlite:///req_validator.db"
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 # 大模型API配置
-API_KEY_DEFAULT = "sk-ba7862f60e3e460e88e17dad82e34982"
+API_KEY_DEFAULT = os.environ.get("API_KEY_DEFAULT", "")
 API_URL_DEFAULT = "https://api.deepseek.com"
 API_MODEL_DEFAULT = "deepseek-chat"
 
 API_TIMEOUT = 270
+
+# 对外访问地址，用于 MCP 工具返回可由 Agent 下载的文件 URL。
+# Docker 默认映射宿主机 8001 -> 容器 5000。
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8001").rstrip("/")
+
+# 本地直接运行默认监听 8001；Docker Compose 会显式覆盖为容器内 5000。
+SERVER_PORT = int(os.environ.get("SERVER_PORT", "8001"))
+
+# MCP 的 JSON-RPC 请求需要携带 Base64 文件内容。默认限制原始文件为 20 MiB，
+# 避免一次工具调用占用过多内存；可按部署环境调整。
+MAX_MCP_UPLOAD_BYTES = int(os.environ.get("MAX_MCP_UPLOAD_BYTES", str(20 * 1024 * 1024)))

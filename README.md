@@ -8,6 +8,7 @@
 - **智能解析**: 自动提取文档标题和内容，构建需求树结构
 - **AI验证**: 使用DeepSeek大模型验证需求是否符合规范
 - **JSON导出**: 将需求树导出为JSON格式，便于后续处理
+- **MCP服务**: 在同一服务端口的 `/mcp/` 提供面向 Agent 的上传、解析、验证和导出工具
 - **历史管理**: 查看和管理已上传的文档
 
 ## 技术栈
@@ -53,7 +54,11 @@ pip install -r requirements.txt
 python run.py
 ```
 
-应用将在 http://127.0.0.1:5000 启动
+本地直接运行时，应用将在 http://127.0.0.1:8001 启动。
+
+Docker 默认映射到 `http://localhost:8001`，MCP 地址为
+`http://localhost:8001/mcp/`。详细配置和验收步骤见
+[`docs/MCP_INTEGRATION.md`](docs/MCP_INTEGRATION.md)。
 
 ### 3. 使用API
 
@@ -105,7 +110,7 @@ curl http://127.0.0.1:5000/documents
 
 - `UPLOAD_FOLDER`: 上传文件存储目录
 - `ALLOWED_EXTENSIONS`: 允许的文件类型
-- `API_KEY_DEFAULT`: DeepSeek API密钥
+- `API_KEY_DEFAULT`: DeepSeek API 密钥，通过同名环境变量注入，请勿提交到代码仓库
 - `API_URL_DEFAULT`: DeepSeek API地址
 - `SQLALCHEMY_DATABASE_URI`: 数据库连接串
 

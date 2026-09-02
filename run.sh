@@ -16,9 +16,15 @@ docker run -d -p 8001:5000 \
   -e UNIPORTAL_EXPORT_SUBDIR=document-validator \
   -e UNIPORTAL_EXPORT_FILENAME=requirement.json \
   -e LOCAL_WORKSPACES_DIR=/app/local_workspaces \
+  -e API_KEY_DEFAULT="${API_KEY_DEFAULT:-}" \
+  -e SERVER_PORT=5000 \
+  -e PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-http://localhost:8001}" \
+  -e MCP_ALLOWED_HOSTS="${MCP_ALLOWED_HOSTS:-}" \
+  -e MCP_ALLOWED_ORIGINS="${MCP_ALLOWED_ORIGINS:-}" \
   --name reqcheck \
   --restart=unless-stopped \
   "$IMAGE"
 
 echo "ReqCheck 已启动: http://localhost:8001"
+echo "ReqCheck MCP: ${PUBLIC_BASE_URL:-http://localhost:8001}/mcp/"
 echo "验证: docker exec reqcheck python scripts/verify_uniportal_integration.py"

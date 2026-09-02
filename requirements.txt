@@ -6,3 +6,6 @@ Pillow
 requests
 markdown-it-py
 mdit-py-plugins
+mcp==2.1.1
+uvicorn>=0.30,<1
+asgiref>=3.8,<4

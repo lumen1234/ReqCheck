@@ -13,4 +13,9 @@ if __name__ == '__main__':
         print(f'导出 JSON 将同步至共享卷: {{portal_project_id}}/{{item_id}}/{subdir}/{export_name}')
     else:
         print('UniPortal 集成未启用（独立模式，仅本地上传；导出仅写 local_workspaces/export_results/）')
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = app.config['SERVER_PORT']
+    print(f"Web 服务地址: {app.config['PUBLIC_BASE_URL']}/")
+    print(f"MCP 服务地址（供 MCP 客户端配置，不是网页）: {app.config['PUBLIC_BASE_URL']}/mcp/")
+    print(f"MCP 状态检查地址（可用浏览器打开）: {app.config['PUBLIC_BASE_URL']}/mcp/health")
+    import uvicorn
+    uvicorn.run('app.asgi:application', host='0.0.0.0', port=port, reload=False)

@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_from_directory
 from app import app
 from app.models import Document, DocumentBatch, RequirementTree, ValidationResult
 from app.services import project_service
@@ -8,6 +8,24 @@ import os
 import json
 
 export_bp = Blueprint('export', __name__)
+
+
+@export_bp.route('/api/export/files/<path:filename>', methods=['GET'])
+def download_export_file(filename):
+	"""下载由导出接口持久化的 JSON；拒绝目录穿越和非 JSON 文件。"""
+	safe_name = os.path.basename(filename)
+	if safe_name != filename or not safe_name.lower().endswith('.json'):
+		return jsonify({'error': 'Invalid export filename'}), 400
+	export_dir = _export_output_folder()
+	if not os.path.isfile(os.path.join(export_dir, safe_name)):
+		return jsonify({'error': 'Export file not found'}), 404
+	return send_from_directory(
+		export_dir,
+		safe_name,
+		mimetype='application/json',
+		as_attachment=True,
+		download_name=safe_name,
+	)
 
 
 def _export_output_folder():
