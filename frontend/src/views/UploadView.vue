@@ -134,7 +134,7 @@
  <div class="flex items-center justify-between border-b border-slate-100 pb-2">
  <h2 class="text-xl font-bold flex items-center gap-2 text-slate-800">
  <History class="w-5 h-5 text-primary-600" />
- {{ uniPortalMode ? '项目列表（UniPortal + 本地上传）' : '历史文档（本地上传）' }}
+ {{ uniPortalMode ? '项目列表' : '历史文档' }}
  </h2>
  <button @click="fetchDocuments" class="text-sm font-semibold text-primary-600 hover:text-primary-700">刷新列表</button>
  </div>
@@ -159,7 +159,7 @@
  <div class="flex items-center gap-2">
  <p class="text-sm font-bold text-slate-900">{{ doc.filename }}</p>
  <span v-if="isBatchDoc(doc)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-purple-100 text-purple-800">文件夹 · {{ doc.file_count ||0 }} 个</span>
- <span v-else-if="doc.source === 'uniportal'" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-100 text-blue-800">UniPortal</span>
+ <span v-else-if="doc.source === 'uniportal'" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-100 text-blue-800">共享</span>
  <span v-else-if="doc.source === 'local'" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-slate-100 text-slate-600">本地</span>
  </div>
  <p class="text-xs text-slate-500">{{ doc.upload_time }}</p>

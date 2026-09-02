@@ -125,7 +125,7 @@ const handleLoadMockData = () => {
 }
 
 .requirement-tree :deep(.el-tree-node.is-current > .el-tree-node__content) {
-  background-color: #0f172a !important;
+  background-color: #1e3a8a !important;
   color: white;
 }
 
