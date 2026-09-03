@@ -12,6 +12,7 @@ TOOL_OUTPUT_DIR_NAMES = frozenset(
     {
         "document-validator",
         "configuration-test-case-generate",
+        "uniportal",
     }
 )
 

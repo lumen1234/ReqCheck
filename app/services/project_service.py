@@ -19,6 +19,7 @@ from app.services.uniportal_paths import (
 
 # 多文档 item 的子文档 ID：{item_id}--{md5(relpath)[:12]}
 _SUBDOC_SEP = "--"
+_MANIFEST_RELATIVE_PATH = os.path.join("uniportal", "project_manifest.json")
 
 
 @dataclass
@@ -32,6 +33,7 @@ class ProjectEntry:
     file_type: Optional[str] = None
     file_path: Optional[str] = None
     kind: Optional[str] = None  # "batch" | None
+    documents: Optional[list[dict[str, Any]]] = None
 
 
 @dataclass
@@ -232,15 +234,34 @@ def _local_upload_path(project_id: str) -> Optional[str]:
     return None
 
 
-def _count_files(root: str) -> int:
-    count = 0
-    skip = {_export_subdir(), "configuration-test-case-generate"}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
-        for name in filenames:
-            if not name.startswith("."):
-                count += 1
-    return count
+def _manifest_current_item(item_dir: str) -> dict[str, Any]:
+    """读取 item 根目录下的 UniPortal 当前软件项元信息。"""
+    manifest_path = os.path.join(item_dir, _MANIFEST_RELATIVE_PATH)
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+
+    if not isinstance(manifest, dict):
+        return {}
+    current_item = manifest.get("current_item")
+    return current_item if isinstance(current_item, dict) else {}
+
+
+def _item_document_payload(document: ItemDocumentEntry, upload_time: str) -> dict[str, Any]:
+    return {
+        "doc": document.batch_order,
+        "doc_id": document.doc_id,
+        "id": document.doc_id,
+        "filename": document.filename,
+        "relative_path": document.relative_path,
+        "file_type": document.file_type,
+        "status": "available",
+        "upload_time": upload_time,
+        "source": "uniportal",
+        "file_path": document.filepath,
+    }
 
 
 def list_item_documents(
@@ -289,8 +310,9 @@ def get_uniportal_batch_detail(
     if not docs:
         return None
 
-    batch_name = _pick_display_name(item_dir, item_id)
-    mtime = datetime.fromtimestamp(os.path.getmtime(item_dir)).isoformat()
+    current_item = _manifest_current_item(item_dir)
+    batch_name = _pick_display_name(item_dir, item_id, portal_project_id)
+    mtime = current_item.get("uploaded_at") or datetime.fromtimestamp(os.path.getmtime(item_dir)).isoformat()
     return {
         "batch_id": item_id,
         "doc_id": item_id,
@@ -299,32 +321,25 @@ def get_uniportal_batch_detail(
         "status": "available",
         "upload_time": mtime,
         "doc_count": len(docs),
-        "documents": [
-            {
-                "doc": d.batch_order,
-                "doc_id": d.doc_id,
-                "id": d.doc_id,
-                "filename": d.filename,
-                "relative_path": d.relative_path,
-                "file_type": d.file_type,
-                "status": "available",
-                "upload_time": mtime,
-                "source": "uniportal",
-                "file_path": d.filepath,
-            }
-            for d in docs
-        ],
+        "documents": [_item_document_payload(d, mtime) for d in docs],
         "source": "uniportal",
         "kind": "batch",
         "file_path": item_dir,
     }
 
 
-def _pick_display_name(item_dir: str, project_id: str) -> str:
+def _pick_display_name(
+    item_dir: str,
+    project_id: str,
+    portal_project_id: Optional[str] = None,
+) -> str:
+    manifest_name = _manifest_current_item(item_dir).get("name")
+    if isinstance(manifest_name, str) and manifest_name.strip():
+        return manifest_name.strip()
     folder_name = pick_project_content_name(item_dir, skip_subdir=_export_subdir())
     if folder_name:
         return folder_name
-    docs = list_item_documents(project_id)
+    docs = list_item_documents(project_id, portal_project_id=portal_project_id)
     if len(docs) == 1:
         return docs[0].filename
     if docs:
@@ -405,19 +420,21 @@ def _scan_uniportal_items(portal_project_id: str) -> list[ProjectEntry]:
             continue
         docs = list_item_documents(item_id, portal_project_id=portal_project_id)
         doc_count = len(docs)
-        mtime = datetime.fromtimestamp(os.path.getmtime(item_dir)).isoformat()
+        current_item = _manifest_current_item(item_dir)
+        mtime = current_item.get("uploaded_at") or datetime.fromtimestamp(os.path.getmtime(item_dir)).isoformat()
         is_batch = doc_count > 1
         items.append(
             ProjectEntry(
                 project_id=item_id,
-                project_name=_pick_display_name(item_dir, item_id),
-                file_count=doc_count if doc_count else _count_files(item_dir),
+                project_name=_pick_display_name(item_dir, item_id, portal_project_id),
+                file_count=doc_count,
                 status="available",
                 source="uniportal",
                 upload_time=mtime,
                 file_type="folder" if is_batch else "uniportal",
                 file_path=item_dir,
                 kind="batch" if is_batch else None,
+                documents=[_item_document_payload(doc, mtime) for doc in docs],
             )
         )
     return items
@@ -469,4 +486,6 @@ def project_entry_to_dict(entry: ProjectEntry) -> dict:
     }
     if entry.kind:
         payload["kind"] = entry.kind
+    if entry.documents is not None:
+        payload["documents"] = entry.documents
     return payload

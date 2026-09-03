@@ -148,7 +148,45 @@
  </div>
 
  <div v-else class="grid grid-cols-1 gap-4">
- <div v-for="doc in documents" :key="doc.id" class="bg-white border border-slate-200 rounded-lg p-4 hover:shadow-md transition-all cursor-pointer group" @click="selectDocument(doc)">
+ <div v-for="doc in documents" :key="doc.id">
+ <div v-if="isSharedProject(doc)" class="bg-white border border-slate-200 rounded-lg overflow-hidden transition-all hover:shadow-md">
+ <button type="button" class="w-full p-4 text-left group" :aria-expanded="isProjectExpanded(doc.id)" @click="toggleSharedProject(doc.id)">
+ <div class="flex items-center justify-between">
+ <div class="flex items-center space-x-4">
+ <div class="w-10 h-10 bg-primary-50 rounded flex items-center justify-center">
+ <FolderUp class="w-6 h-6 text-primary-600" />
+ </div>
+ <div>
+ <div class="flex items-center gap-2">
+ <p class="text-sm font-bold text-slate-900">{{ doc.filename }}</p>
+ <span class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-100 text-blue-800">共享</span>
+ <span class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-purple-100 text-purple-800">{{ doc.file_count ||0 }} 个文档</span>
+ </div>
+ <p class="text-xs text-slate-500">{{ doc.upload_time }}</p>
+ </div>
+ </div>
+ <ChevronRight class="w-5 h-5 text-slate-400 group-hover:text-primary-600 transition-transform" :class="{ 'rotate-90': isProjectExpanded(doc.id) }" />
+ </div>
+ </button>
+
+ <div v-if="isProjectExpanded(doc.id)" class="border-t border-slate-100 bg-slate-50 px-4 py-2">
+ <button v-for="child in doc.documents" :key="child.id" type="button" class="w-full flex items-center justify-between gap-4 px-3 py-3 rounded-lg text-left hover:bg-white hover:shadow-sm transition-all group" @click="selectDocument(child)">
+ <div class="flex items-center gap-3 min-w-0">
+ <div class="w-8 h-8 shrink-0 bg-white border border-slate-200 rounded flex items-center justify-center">
+ <FileText class="w-4 h-4 text-primary-600" />
+ </div>
+ <div class="min-w-0">
+ <p class="text-sm font-semibold text-slate-800 truncate">{{ child.filename }}</p>
+ <p v-if="child.relative_path && child.relative_path !== child.filename" class="text-xs text-slate-500 truncate">{{ child.relative_path }}</p>
+ </div>
+ </div>
+ <ChevronRight class="w-4 h-4 shrink-0 text-slate-400 group-hover:text-primary-600" />
+ </button>
+ <p v-if="!doc.documents || doc.documents.length ===0" class="px-3 py-4 text-sm text-slate-400">该项目下暂无可分析文档</p>
+ </div>
+ </div>
+
+ <div v-else class="bg-white border border-slate-200 rounded-lg p-4 hover:shadow-md transition-all cursor-pointer group" @click="selectDocument(doc)">
  <div class="flex items-center justify-between">
  <div class="flex items-center space-x-4">
  <div class="w-10 h-10 bg-primary-50 rounded flex items-center justify-center">
@@ -158,18 +196,18 @@
  <div>
  <div class="flex items-center gap-2">
  <p class="text-sm font-bold text-slate-900">{{ doc.filename }}</p>
+ <span class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-slate-100 text-slate-600">本地</span>
  <span v-if="isBatchDoc(doc)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-purple-100 text-purple-800">文件夹 · {{ doc.file_count ||0 }} 个</span>
- <span v-else-if="doc.source === 'uniportal'" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-100 text-blue-800">共享</span>
- <span v-else-if="doc.source === 'local'" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-slate-100 text-slate-600">本地</span>
  </div>
  <p class="text-xs text-slate-500">{{ doc.upload_time }}</p>
  </div>
  </div>
  <div class="flex items-center space-x-2">
- <button v-if="doc.source !== 'uniportal'" @click="handleDeleteDocument(doc, $event)" :disabled="deleting && deletingDocId === doc.id" class="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all disabled:opacity-50" :title="isBatchDoc(doc) ? '删除文件夹' : '删除文档'">
+ <button @click="handleDeleteDocument(doc, $event)" :disabled="deleting && deletingDocId === doc.id" class="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all disabled:opacity-50" :title="isBatchDoc(doc) ? '删除文件夹' : '删除文档'">
  <Trash2 class="w-4 h-4" :class="{ 'animate-pulse': deleting && deletingDocId === doc.id }" />
  </button>
  <ChevronRight class="w-5 h-5 text-slate-400 group-hover:text-primary-600" />
+ </div>
  </div>
  </div>
  </div>
@@ -201,6 +239,7 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 const loading = ref(false)
 const documents = ref([])
+const expandedProjectIds = ref(new Set())
 const deleting = ref(false)
 const deletingDocId = ref(null)
 
@@ -209,6 +248,14 @@ const supportedExt = /\.(pdf|doc|docx|txt|md|markdown)$/i
 
 const formatSize = (size) => `${(size /1024).toFixed(2)} KB`
 const isBatchDoc = (doc) => doc.kind === 'batch' || doc.source === 'local_batch' || doc.file_type === 'folder' || (doc.source === 'uniportal' && (doc.file_count || 0) > 1)
+const isSharedProject = (doc) => doc.source === 'uniportal' && Array.isArray(doc.documents)
+const isProjectExpanded = (projectId) => expandedProjectIds.value.has(projectId)
+const toggleSharedProject = (projectId) => {
+ const next = new Set(expandedProjectIds.value)
+ if (next.has(projectId)) next.delete(projectId)
+ else next.add(projectId)
+ expandedProjectIds.value = next
+}
 const buildRouteQuery = (docName, extra = {}) => withPortalQuery({ docName, ...extra })
 
 const switchUploadMode = (mode) => {
@@ -315,7 +362,10 @@ const fetchDocuments = async () => {
  loading.value = true
  try {
  const response = await getDocuments(portalProjectId.value)
- documents.value = response.documents || []
+ const nextDocuments = response.documents || []
+ const sharedProjectIds = new Set(nextDocuments.filter(isSharedProject).map((doc) => doc.id))
+ expandedProjectIds.value = new Set([...expandedProjectIds.value].filter((id) => sharedProjectIds.has(id)))
+ documents.value = nextDocuments
  } catch (error) {
  console.error('Failed to fetch documents:', error)
  } finally {
